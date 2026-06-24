@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { LandingNav } from "@/components/landing-nav";
 
 function UthLogo({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
   const s = { sm: "text-lg", md: "text-2xl", lg: "text-4xl" }[size];
@@ -122,25 +123,7 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       {/* Navigation */}
-      <nav className="border-b border-white/8 px-6 py-4 flex items-center justify-between sticky top-0 bg-zinc-950/90 backdrop-blur-xl z-50">
-        <div className="flex items-center gap-8">
-          <Link href="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
-              <span className="font-black text-white text-xs tracking-tighter">UTH</span>
-            </div>
-            <UthLogo size="sm" />
-          </Link>
-          <div className="hidden md:flex items-center gap-6">
-            {[["Platform", "/platform"], ["How it works", "#how-it-works"], ["Use cases", "#use-cases"], ["Pricing", "/pricing"], ["Docs", "/docs"]].map(([l, h]) => (
-              <Link key={l} href={h} className="text-sm text-zinc-400 hover:text-white transition-colors">{l}</Link>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link href="/login"><Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white">Sign in</Button></Link>
-          <Link href="/onboarding"><Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white">Start free <ChevronRight className="w-3.5 h-3.5 ml-0.5" /></Button></Link>
-        </div>
-      </nav>
+      <LandingNav />
 
       {/* Hero */}
       <section className="max-w-6xl mx-auto px-6 pt-24 pb-20 text-center">
