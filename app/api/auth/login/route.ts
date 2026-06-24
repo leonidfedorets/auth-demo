@@ -6,10 +6,16 @@ import { cacheSession, loginRateLimit, incrementFailedLogins, resetFailedLogins 
 import { evaluateRisk } from "@/lib/risk";
 
 export async function POST(req: NextRequest) {
+  try {
   const ip = getClientIP(req);
   const ua = req.headers.get("user-agent") ?? "";
 
-  const { success } = await loginRateLimit.limit(ip);
+  let rateLimitSuccess = true;
+  try {
+    const rl = await loginRateLimit.limit(ip);
+    rateLimitSuccess = rl.success;
+  } catch { /* Redis unavailable — skip rate limit */ }
+  const success = rateLimitSuccess;
   if (!success) return NextResponse.json({ error: "rate_limit_exceeded", message: "Too many login attempts" }, { status: 429 });
 
   const body = await req.json();
@@ -102,4 +108,8 @@ export async function POST(req: NextRequest) {
   res.cookies.set("access_token", accessToken, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: accessTTLSeconds(), path: "/" });
   res.cookies.set("refresh_token", refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: refreshTTLSeconds(), path: "/" });
   return res;
+  } catch (err) {
+    console.error("[login] unexpected error:", err);
+    return NextResponse.json({ error: "server_error", message: "An unexpected error occurred" }, { status: 500 });
+  }
 }

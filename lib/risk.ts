@@ -31,7 +31,7 @@ export async function evaluateRisk(opts: {
   let totalScore = 0;
 
   // ── Velocity: failed logins ───────────────────────────────────
-  const failedCount = await getFailedLogins(opts.ip);
+  const failedCount = await getFailedLogins(opts.ip).catch(() => 0);
   if (failedCount >= 5) {
     const score = Math.min(failedCount * 5, 30);
     signals.push({ name: "velocity", score, description: `${failedCount} failed logins from this IP`, data: { count: failedCount } });
