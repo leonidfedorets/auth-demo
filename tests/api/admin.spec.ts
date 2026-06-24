@@ -8,11 +8,33 @@ test.describe("Admin API endpoints", () => {
   // Each test logs in first since Playwright request contexts don't persist
   // cookies across tests in serial mode automatically.
 
-  test("GET /api/admin/stats - requires auth, returns 401 without credentials", async ({ request }) => {
+  test("GET /api/admin/stats - returns 401 without credentials", async ({ request }) => {
     const r = await request.get(`${BASE}/api/admin/stats`);
     expect(r.status()).toBe(401);
     const body = await r.json();
     expect(body).toHaveProperty("error");
+  });
+
+  test("GET /api/admin/stats - returns KPIs for authenticated user", async ({ request }) => {
+    const loginR = await request.post(`${BASE}/api/auth/login`, {
+      data: { email: "leonidfedorets30@gmail.com", password: "Zadov281983" },
+    });
+    if (loginR.status() !== 200) {
+      test.skip(true, "Step-up MFA required — session not fully established");
+      return;
+    }
+    const r = await request.get(`${BASE}/api/admin/stats`);
+    expect(r.status()).toBe(200);
+    const body = await r.json();
+    expect(body).toHaveProperty("totalTransactions");
+    expect(typeof body.totalTransactions).toBe("number");
+    expect(body).toHaveProperty("totalUsers");
+    expect(body).toHaveProperty("boundDevices");
+    expect(body).toHaveProperty("activeSessions");
+    expect(body).toHaveProperty("txLast7Days");
+    expect(Array.isArray(body.txLast7Days)).toBe(true);
+    expect(body.txLast7Days).toHaveLength(7);
+    expect(body).toHaveProperty("riskDistribution");
   });
 
   test("GET /api/admin/settings - requires auth cookie", async ({ request }) => {

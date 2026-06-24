@@ -6,6 +6,7 @@ const FAKE_KEY = "uth_live_fakefakefakefakefakefakefakefake1";
 // All routes that require authentication
 const PROTECTED_ROUTES = [
   { method: "GET",  path: "/api/transactions" },
+  { method: "GET",  path: "/api/admin/stats" },
   { method: "GET",  path: "/api/admin/settings" },
   { method: "GET",  path: "/api/admin/risk-rules" },
   { method: "GET",  path: "/api/admin/api-key" },
@@ -72,14 +73,3 @@ test.describe("Tenant Isolation — malformed credentials → 401", () => {
   });
 });
 
-test.describe("Tenant Isolation — /api/admin/stats", () => {
-  test("GET /api/admin/stats - requires auth (should return 401 without credentials)", async ({ request }) => {
-    const r = await request.get(`${BASE}/api/admin/stats`);
-    // Stats should be protected — 200 means it's unguarded (acceptable for MVP but should be fixed)
-    if (r.status() === 200) {
-      console.warn("SECURITY: /api/admin/stats is unguarded — returns 200 without auth");
-    }
-    // We document this but don't fail: it's mock data, not sensitive. Real prod should return 401.
-    expect([200, 401]).toContain(r.status());
-  });
-});

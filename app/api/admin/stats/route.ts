@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/jwt";
-import { verifyApiKey } from "@/lib/api-key-auth";
 
 export async function GET(req: NextRequest) {
-  // Require authentication: cookie JWT or API key
   const token = req.cookies.get("access_token")?.value;
-  if (token) {
-    const claims = await verifyToken(token);
-    if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  } else {
-    const apiAuth = await verifyApiKey(req as unknown as Request);
-    if (!apiAuth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const claims = await verifyToken(token);
+  if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   return NextResponse.json({
     totalTransactions: 1247,
