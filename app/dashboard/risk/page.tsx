@@ -38,10 +38,10 @@ export default function RiskPage() {
           <h1 className="text-2xl font-bold text-white">Risk Profile</h1>
           <p className="text-zinc-400 mt-1">Current session risk evaluation</p>
         </div>
-        <Link href="/demo/risk">
+        <Link href="/platform/risk-engine">
           <Button variant="outline" className="border-zinc-700 text-zinc-300 gap-2">
             <ExternalLink className="h-4 w-4" />
-            Interactive Risk Demo
+            Risk Engine
           </Button>
         </Link>
       </div>

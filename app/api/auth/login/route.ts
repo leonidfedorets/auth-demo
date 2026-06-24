@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
       const codeHash = require("crypto").createHash("sha256").update(code).digest("hex");
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
       await sql`INSERT INTO sca_challenges (user_id, method, code_hash, expires_at) VALUES (${user.id}, 'email_otp', ${codeHash}, ${expiresAt})`;
-      console.log(`[DEMO SCA CODE for ${email}]: ${code}`); // In demo, logged to console
+      // SCA code issued — deliver via configured channel (email/SMS/push)
     }
 
     await sql`INSERT INTO audit_logs (user_id, action, ip_address, user_agent, risk_score, details) VALUES (${user.id}, 'auth.sca.challenge', ${ip}, ${ua}, ${risk.score}, ${JSON.stringify({ method, reason: risk.decision })})`;

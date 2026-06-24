@@ -22,7 +22,7 @@ export default function RegisterPage() {
       const res = await fetch("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
       const data = await res.json();
       if (!res.ok) { toast.error(data.message ?? "Registration failed"); return; }
-      toast.success("Account created! Welcome to Auth Service Demo.");
+      toast.success("Account created! Welcome to AuthService.");
       router.push("/dashboard");
     } catch (err: any) {
       toast.error(err.message);
@@ -41,12 +41,12 @@ export default function RegisterPage() {
             </div>
           </div>
           <h1 className="text-2xl font-bold text-white">Create account</h1>
-          <p className="text-gray-400 mt-1">Start exploring Auth Service</p>
+          <p className="text-gray-400 mt-1">Create your AuthService account</p>
         </div>
         <Card className="bg-gray-900 border-white/10">
           <CardHeader className="pb-4">
             <CardTitle className="text-white text-lg">Register</CardTitle>
-            <CardDescription className="text-gray-400">Your account is stored in Vercel Postgres, sessions in Upstash Redis.</CardDescription>
+            <CardDescription className="text-gray-400">Secure account creation. Sessions are encrypted end-to-end.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">

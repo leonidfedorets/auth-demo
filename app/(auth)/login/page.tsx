@@ -71,14 +71,14 @@ export default function LoginPage() {
             </div>
           </div>
           <h1 className="text-2xl font-bold text-white">Welcome back</h1>
-          <p className="text-gray-400 mt-1">Sign in to Auth Service Demo</p>
+          <p className="text-gray-400 mt-1">Sign in to AuthService</p>
         </div>
 
         <Card className="bg-gray-900 border-white/10">
           <CardHeader className="pb-4">
             <CardTitle className="text-white text-lg">Sign In</CardTitle>
             <CardDescription className="text-gray-400">
-              Risk engine runs on every login. Try Tor or VPN to see it trigger SCA.
+              The adaptive risk engine evaluates every login in real time.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -125,21 +125,12 @@ export default function LoginPage() {
               No account? <Link href="/register" className="text-blue-400 hover:underline">Create one</Link>
             </div>
 
-            <div className="mt-6 pt-4 border-t border-white/10">
-              <p className="text-xs text-gray-500 text-center mb-2">Demo accounts</p>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="flex-1 text-xs border-white/10 text-gray-400" onClick={() => { setEmail("demo@example.com"); setPassword("Demo1234!"); }}>
-                  demo@example.com
-                </Button>
-              </div>
-            </div>
           </CardContent>
         </Card>
 
         <div className="mt-4 flex justify-center gap-4 text-xs text-gray-600">
           <Link href="/" className="hover:text-gray-400">← Home</Link>
-          <Link href="/demo/risk" className="hover:text-gray-400">Risk Demo</Link>
-          <Link href="/demo/webauthn" className="hover:text-gray-400">Passkeys</Link>
+          <Link href="/pricing" className="hover:text-gray-400">Pricing</Link>
         </div>
       </div>
 

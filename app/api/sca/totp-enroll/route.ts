@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const totp = new OTPAuth.TOTP({
-    issuer: "Auth Service Demo",
+    issuer: "AuthService",
     label: claims.email,
     algorithm: "SHA1",
     digits: 6,

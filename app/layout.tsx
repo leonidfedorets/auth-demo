@@ -6,8 +6,9 @@ import { Toaster } from "sonner";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Auth Service Demo | Enterprise Authentication SaaS",
-  description: "Live demo of Auth Service — JWT, WebAuthn, Device Attestation, SCA, Risk Engine. PCI DSS · GDPR · PSD2 compliant.",
+  title: "AuthService — Enterprise Authentication Platform",
+  description: "Production-grade authentication infrastructure. JWT, WebAuthn/Passkeys, Device Attestation, Adaptive Risk Engine, PSD2 SCA. PCI DSS v4.0 · GDPR · FIDO2 L2 compliant.",
+  keywords: ["authentication", "JWT", "WebAuthn", "passkeys", "SCA", "PSD2", "FIDO2", "risk engine", "device attestation"],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

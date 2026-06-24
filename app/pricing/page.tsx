@@ -153,7 +153,7 @@ export default function PricingPage() {
       <nav className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between sticky top-0 bg-zinc-950/90 backdrop-blur z-40">
         <Link href="/" className="flex items-center gap-2 font-bold text-white"><Shield className="h-5 w-5 text-indigo-400" />AuthService</Link>
         <div className="flex items-center gap-4">
-          <Link href="/demo/auth-risk" className="text-zinc-400 hover:text-white text-sm transition-colors">Demo</Link>
+          <Link href="/platform/risk-engine" className="text-zinc-400 hover:text-white text-sm transition-colors">Platform</Link>
           <Link href="/onboarding"><Button className="bg-indigo-600 hover:bg-indigo-700 h-8 text-sm">Get started</Button></Link>
         </div>
       </nav>

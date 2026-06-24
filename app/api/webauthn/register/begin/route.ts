@@ -5,7 +5,7 @@ import { storeWebAuthnChallenge } from "@/lib/redis";
 import { generateRegistrationOptions } from "@simplewebauthn/server";
 
 const rpID = process.env.WEBAUTHN_RP_ID ?? "localhost";
-const rpName = process.env.WEBAUTHN_RP_NAME ?? "Auth Service Demo";
+const rpName = process.env.WEBAUTHN_RP_NAME ?? "AuthService";
 
 export async function POST(req: NextRequest) {
   const token = req.cookies.get("access_token")?.value;

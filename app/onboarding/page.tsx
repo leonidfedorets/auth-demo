@@ -78,7 +78,7 @@ export default function OnboardingPage() {
       const r = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: `test+${Date.now()}@demo.com`, password: "Demo123456!" }),
+        body: JSON.stringify({ email: `trial+${Date.now()}@auth-service.io`, password: "Trial123456!" }),
       });
       const data = await r.json();
       setTestResult({ ok: r.ok, data });
@@ -287,7 +287,7 @@ AUTH_SERVICE_BASE_URL=https://api.auth-service.io/v1`}</pre>
           <div className="space-y-6 animate-fade-in">
             <div>
               <h1 className="text-3xl font-black text-white">Make your first API call</h1>
-              <p className="text-zinc-400 mt-1">Try registering a test user — results are live against the demo API.</p>
+              <p className="text-zinc-400 mt-1">Try registering a test user — this calls the live API.</p>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="space-y-4">
@@ -354,7 +354,7 @@ AUTH_SERVICE_BASE_URL=https://api.auth-service.io/v1`}</pre>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
               {[
-                { title: "Explore the demos", desc: "See every auth flow in action", href: "/demo/auth-risk", label: "Auth Risk Engine" },
+                { title: "Explore the platform", desc: "See every auth flow in action", href: "/platform/risk-engine", label: "Risk Engine" },
                 { title: "Read the docs", desc: "Full API reference with examples", href: "#", label: "Documentation" },
                 { title: "View dashboard", desc: "Monitor sessions and users", href: "/dashboard", label: "Dashboard" },
               ].map(item => (
@@ -385,7 +385,7 @@ AUTH_SERVICE_BASE_URL=https://api.auth-service.io/v1`}</pre>
             </div>
             <div className="flex justify-center gap-4">
               <Link href="/pricing"><Button variant="outline" className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">View plans</Button></Link>
-              <Link href="/demo/auth-risk"><Button className="bg-indigo-600 hover:bg-indigo-700">Explore demos <ArrowRight className="h-4 w-4 ml-2" /></Button></Link>
+              <Link href="/platform/risk-engine"><Button className="bg-indigo-600 hover:bg-indigo-700">Explore platform <ArrowRight className="h-4 w-4 ml-2" /></Button></Link>
             </div>
           </div>
         )}

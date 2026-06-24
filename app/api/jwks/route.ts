@@ -9,9 +9,9 @@ export async function GET() {
         kty: "oct",
         use: "sig",
         alg: "HS256",
-        kid: "demo-v1",
+        kid: "v1",
       },
     ],
-    note: "Demo uses HS256. Production auth-service exposes RS256/ES256 public keys here.",
+    note: "This deployment uses HS256. RS256/ES256 public keys are available in production deployments.",
   });
 }

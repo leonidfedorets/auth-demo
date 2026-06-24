@@ -62,7 +62,7 @@ export default function DevicesPage() {
       ) : devices.length === 0 ? (
         <Card className="bg-zinc-900 border-zinc-800">
           <CardContent className="py-12 text-center text-zinc-500">
-            No devices registered. Visit <a href="/demo/device" className="text-indigo-400 underline">Device Attestation demo</a> to register one.
+            No devices registered. Visit <a href="/platform/device-attestation" className="text-indigo-400 underline">Device Attestation</a> to register one.
           </CardContent>
         </Card>
       ) : (

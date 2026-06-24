@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateId, generateId as genKey } from "@/lib/auth";
 
-// Simple in-memory tenant onboarding for demo — in production this would be a full tenant management system
+// Tenant onboarding endpoint
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const { orgName, email, plan } = body;
