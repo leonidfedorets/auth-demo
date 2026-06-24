@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
 const TENANT_ID = "c7ed9c17-0633-49df-9bc7-81de55f69fb7";
 
 test.describe.configure({ mode: "serial" });

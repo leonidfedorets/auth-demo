@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
 
 async function getApiKey(request: APIRequestContext): Promise<string | null> {
   const loginR = await request.post(`${BASE}/api/auth/login`, {

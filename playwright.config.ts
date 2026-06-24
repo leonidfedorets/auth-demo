@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
-// Use PLAYWRIGHT_BASE_URL env var to target prod: PLAYWRIGHT_BASE_URL=https://auth-demo-rouge.vercel.app npx playwright test
+// Target prod: npm run test:prod
+// Target local: npm run test:api (requires npm run build && npm run start first)
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
 const IS_REMOTE = BASE_URL.startsWith("https://");
 
@@ -13,7 +14,11 @@ export default defineConfig({
     extraHTTPHeaders: { "Content-Type": "application/json" },
     ignoreHTTPSErrors: false,
   },
-  // Only spin up local server when not targeting remote
+  // Expose env to worker processes
+  env: {
+    PLAYWRIGHT_BASE_URL: BASE_URL,
+    IS_PROD: IS_REMOTE ? "true" : "false",
+  },
   ...(IS_REMOTE ? {} : {
     webServer: {
       command: "npm run start",
