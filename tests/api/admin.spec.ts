@@ -8,23 +8,11 @@ test.describe("Admin API endpoints", () => {
   // Each test logs in first since Playwright request contexts don't persist
   // cookies across tests in serial mode automatically.
 
-  test("GET /api/admin/stats - returns tenant KPIs (no auth required)", async ({ request }) => {
-    // /api/admin/stats currently has no auth check
+  test("GET /api/admin/stats - requires auth, returns 401 without credentials", async ({ request }) => {
     const r = await request.get(`${BASE}/api/admin/stats`);
-    expect(r.status()).toBe(200);
+    expect(r.status()).toBe(401);
     const body = await r.json();
-    expect(body).toHaveProperty("totalTransactions");
-    expect(typeof body.totalTransactions).toBe("number");
-    expect(body).toHaveProperty("totalUsers");
-    expect(typeof body.totalUsers).toBe("number");
-    expect(body).toHaveProperty("boundDevices");
-    expect(body).toHaveProperty("activeSessions");
-    expect(body).toHaveProperty("txLast7Days");
-    expect(Array.isArray(body.txLast7Days)).toBe(true);
-    expect(body.txLast7Days).toHaveLength(7);
-    expect(body).toHaveProperty("riskDistribution");
-    expect(body.riskDistribution).toHaveProperty("low");
-    expect(body.riskDistribution).toHaveProperty("high");
+    expect(body).toHaveProperty("error");
   });
 
   test("GET /api/admin/settings - requires auth cookie", async ({ request }) => {

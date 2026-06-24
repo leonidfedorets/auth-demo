@@ -30,7 +30,8 @@ export async function GET(req: NextRequest) {
   const claims = await verifyToken(token);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const tid = (claims.tid as string) || DEMO_TID;
+  const rawTid = claims.tid as string | undefined;
+  const tid = (!rawTid || rawTid === "default") ? DEMO_TID : rawTid;
   const { key, createdAt } = await getOrCreateKey(tid);
 
   const keyPrefix = "uth_live_";
@@ -51,7 +52,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid action" }, { status: 400 });
   }
 
-  const tid = (claims.tid as string) || DEMO_TID;
+  const rawTid = claims.tid as string | undefined;
+  const tid = (!rawTid || rawTid === "default") ? DEMO_TID : rawTid;
   const newKey = generateApiKey();
   const createdAt = new Date().toISOString();
   await redis.set(`tenant:apikey:${tid}`, newKey);

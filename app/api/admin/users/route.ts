@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   try {
     let query = `SELECT id, email, display_name, created_at, mfa_enabled, totp_enabled FROM users WHERE tenant_id = $1`;
-    const params: any[] = [claims.tid || "default"];
+    const params: any[] = [(claims.tid && claims.tid !== "default" ? claims.tid : "c7ed9c17-0633-49df-9bc7-81de55f69fb7")];
     if (search) { query += ` AND (email ILIKE $2 OR display_name ILIKE $2)`; params.push(`%${search}%`); }
     query += ` ORDER BY created_at DESC LIMIT 100`;
     const result = await sql.query(query, params);

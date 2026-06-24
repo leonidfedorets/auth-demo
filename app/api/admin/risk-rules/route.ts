@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   const claims = await verifyToken(token);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
-    const stored = await redis.get<typeof DEFAULT_RULES>(`risk:rules:${claims.tid||"default"}`);
+    const stored = await redis.get<typeof DEFAULT_RULES>(`risk:rules:${(claims.tid && claims.tid !== "default" ? claims.tid : "c7ed9c17-0633-49df-9bc7-81de55f69fb7")}`);
     return NextResponse.json({ rules: stored || DEFAULT_RULES });
   } catch {
     return NextResponse.json({ rules: DEFAULT_RULES });
@@ -42,7 +42,7 @@ export async function PUT(req: NextRequest) {
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
   try {
-    await redis.set(`risk:rules:${claims.tid||"default"}`, body, { ex: 86400 * 365 });
+    await redis.set(`risk:rules:${(claims.tid && claims.tid !== "default" ? claims.tid : "c7ed9c17-0633-49df-9bc7-81de55f69fb7")}`, body, { ex: 86400 * 365 });
     return NextResponse.json({ success: true, rules: body });
   } catch {
     return NextResponse.json({ success: true, rules: body });
