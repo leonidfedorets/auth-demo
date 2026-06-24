@@ -6,10 +6,10 @@ import { Badge } from "@/components/ui/badge";
 const features = [
   { icon: Key, title: "JWT + Sessions", desc: "RS256/ES256 tokens with configurable claims — sid, did, amr, acr, risk score, SCA state", href: "/dashboard", color: "text-blue-400" },
   { icon: Lock, title: "WebAuthn / Passkeys", desc: "FIDO2 passwordless authentication — register and use platform authenticators in your browser", href: "/demo/webauthn", color: "text-purple-400" },
-  { icon: Smartphone, title: "Device Attestation", desc: "Apple App Attest · Android Play Integrity · Windows TPM — cryptographic device binding", href: "/demo/device", color: "text-green-400" },
-  { icon: Activity, title: "Risk Engine", desc: "Adaptive scoring: velocity, geo-anomaly, impossible travel, Tor/VPN, device fingerprint", href: "/demo/risk", color: "text-yellow-400" },
-  { icon: Shield, title: "SCA / Step-Up Auth", desc: "PSD2-compliant strong customer authentication — TOTP, WebAuthn, email OTP with dynamic linking", href: "/demo/sca", color: "text-red-400" },
-  { icon: Globe, title: "Multi-Tenant SaaS", desc: "Row-level tenant isolation, per-tenant config overrides, API key management, audit trail", href: "/dashboard/audit", color: "text-cyan-400" },
+  { icon: Smartphone, title: "Device Attestation", desc: "18 signal codes · 5 status states · Apple App Attest · Play Integrity · Windows TPM", href: "/demo/attestation", color: "text-green-400" },
+  { icon: Activity, title: "Auth Risk Engine", desc: "Device Trust Layer (9 signals) + Network & Geo (2 signals). Override rules A–E. Score 0–100.", href: "/demo/auth-risk", color: "text-yellow-400" },
+  { icon: Shield, title: "Engine Risk (50/50)", desc: "4 engine layers + 50/50 consolidation with Auth Risk. FinalScore = (AuthRisk + EngineRisk) / 2", href: "/demo/engine-risk", color: "text-orange-400" },
+  { icon: Globe, title: "SCA / PSD2", desc: "Dynamic linking, single-use challenges, WebAuthn SCA, TOTP step-up. ALLOW/DENY result.", href: "/demo/sca-service", color: "text-red-400" },
 ];
 
 const compliance = ["PCI DSS v4.0", "GDPR (EU) 2016/679", "PSD2 / SCA", "FIDO2 / WebAuthn L2", "OIDC / OAuth 2.0", "RFC 8176 (AMR)", "RFC 6711 (ACR)"];
@@ -25,8 +25,10 @@ export default function LandingPage() {
           <Badge variant="secondary" className="text-xs">Demo</Badge>
         </div>
         <div className="flex items-center gap-3">
+          <Link href="/pricing" className="text-gray-400 hover:text-white text-sm transition-colors">Pricing</Link>
+          <Link href="/demo/auth-risk" className="text-gray-400 hover:text-white text-sm transition-colors">Demo</Link>
           <Link href="/login"><Button variant="ghost" size="sm">Sign In</Button></Link>
-          <Link href="/register"><Button size="sm">Get Started</Button></Link>
+          <Link href="/onboarding"><Button size="sm">Get Started</Button></Link>
         </div>
       </nav>
 
@@ -103,6 +105,25 @@ export default function LandingPage() {
   "custom": { "org_id": "acme" } // per-tenant custom claims
 }`}
           </pre>
+        </div>
+      </section>
+
+      {/* Pricing CTA */}
+      <section className="max-w-4xl mx-auto px-6 pb-24 text-center">
+        <div className="rounded-2xl border border-indigo-500/30 bg-indigo-600/10 p-12 space-y-4">
+          <h2 className="text-3xl font-black text-white">Ready to integrate?</h2>
+          <p className="text-gray-400">Start free for 14 days. No credit card required. Starter from €299/mo.</p>
+          <div className="flex items-center justify-center gap-4 pt-2">
+            <Link href="/onboarding">
+              <Button size="lg" className="bg-indigo-600 hover:bg-indigo-700">
+                Start free trial <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
+            </Link>
+            <Link href="/pricing">
+              <Button size="lg" variant="outline" className="border-white/20 text-white hover:bg-white/10">View pricing</Button>
+            </Link>
+          </div>
+          <p className="text-gray-600 text-xs">PCI DSS v4.0 · GDPR · PSD2/SCA · FIDO2 L2</p>
         </div>
       </section>
 
