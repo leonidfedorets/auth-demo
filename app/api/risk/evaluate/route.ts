@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/jwt";
+import { verifyApiKey } from "@/lib/api-key-auth";
 
 export async function POST(req: NextRequest) {
+  let claims: Record<string, unknown> | null = null;
   const token = req.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const claims = await verifyToken(token);
+  if (token) {
+    claims = await verifyToken(token) as Record<string, unknown> | null;
+  }
+  if (!claims) {
+    const apiAuth = await verifyApiKey(req as unknown as Request);
+    if (apiAuth) {
+      claims = { sub: apiAuth.email, tid: apiAuth.tid, sid: null };
+    }
+  }
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));

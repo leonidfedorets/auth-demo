@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Settings, Save, Clock, Shield, Smartphone, Activity, Key, RefreshCw } from "lucide-react";
+import { Settings, Save, Clock, Shield, Smartphone, Activity, Key, RefreshCw, Eye, EyeOff, Copy, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,11 +31,18 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<"jwt"|"device"|"attestation"|"risk">("jwt");
+  const [tab, setTab] = useState<"jwt"|"device"|"attestation"|"risk"|"apikeys">("jwt");
+  const [apiKeyData, setApiKeyData] = useState<{keyPrefix:string;keySuffix:string;keyMasked:string;createdAt:string;tid:string}|null>(null);
+  const [apiKeyRevealed, setApiKeyRevealed] = useState(false);
+  const [fullApiKey, setFullApiKey] = useState<string|null>(null);
+  const [apiKeyLoading, setApiKeyLoading] = useState(false);
+  const [revokeModal, setRevokeModal] = useState(false);
+  const [apiSnippetTab, setApiSnippetTab] = useState<"curl"|"js"|"python">("curl");
 
   useEffect(()=>{
     fetch("/api/auth/me").then(async r=>{ if(r.status===401){router.push("/login");return;} const d=await r.json(); setUser(d.user); });
     fetch("/api/admin/settings").then(r=>r.json()).then(d=>{ setSettings(d.settings); setLoading(false); });
+    fetch("/api/admin/api-key").then(r=>r.json()).then(d=>{ if(!d.error) setApiKeyData(d); });
   },[]);
 
   async function save() {
@@ -70,7 +77,37 @@ export default function SettingsPage() {
   const attDisabled: string[] = settings.attestation.disabledSignals||[];
   const riskDisabled: string[] = settings.risk.disabledSignals||[];
 
-  const TABS = [{ id:"jwt",label:"JWT & Session",icon:Key },{ id:"device",label:"Device Binding",icon:Smartphone },{ id:"attestation",label:"Attestation Signals",icon:Shield },{ id:"risk",label:"Risk Signals",icon:Activity }];
+  async function loadApiKey() {
+    setApiKeyLoading(true);
+    const r = await fetch("/api/admin/api-key");
+    const d = await r.json();
+    if (!d.error) setApiKeyData(d);
+    setApiKeyLoading(false);
+  }
+
+  async function regenerateKey() {
+    setApiKeyLoading(true);
+    const r = await fetch("/api/admin/api-key", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ action:"regenerate" }) });
+    const d = await r.json();
+    if (d.key) {
+      setFullApiKey(d.key);
+      setApiKeyRevealed(true);
+      toast.success("API key regenerated — copy it now, it will not be shown again.");
+      await loadApiKey();
+    } else {
+      toast.error("Failed to regenerate key");
+    }
+    setRevokeModal(false);
+    setApiKeyLoading(false);
+  }
+
+  function copyKey() {
+    const key = fullApiKey || (apiKeyData ? apiKeyData.keyMasked : "");
+    navigator.clipboard.writeText(key);
+    toast.success("Copied to clipboard");
+  }
+
+  const TABS = [{ id:"jwt",label:"JWT & Session",icon:Key },{ id:"device",label:"Device Binding",icon:Smartphone },{ id:"attestation",label:"Attestation Signals",icon:Shield },{ id:"risk",label:"Risk Signals",icon:Activity },{ id:"apikeys",label:"API Keys",icon:KeyRound }];
 
   return (<div className="min-h-screen bg-zinc-950 text-white"><DashNav user={user}/>
     <div className="max-w-4xl mx-auto px-6 py-10">
@@ -138,6 +175,82 @@ export default function SettingsPage() {
           })}</div>
         </div>
       </div>)}
+
+      {tab==="apikeys" && (<div className="space-y-6">
+        {/* Current Key */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 space-y-4">
+          <h3 className="text-white font-semibold flex items-center gap-2"><KeyRound className="w-4 h-4 text-indigo-400"/>API Key</h3>
+          {apiKeyData && (<>
+            <div>
+              <Label className="text-zinc-400 text-xs mb-2 block">Current API Key</Label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-zinc-200 truncate">
+                  {apiKeyRevealed && fullApiKey ? fullApiKey : apiKeyData.keyMasked}
+                </code>
+                <button onClick={()=>setApiKeyRevealed(r=>!r)} className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white transition-colors" title="Reveal/hide key">
+                  {apiKeyRevealed ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>}
+                </button>
+                <button onClick={copyKey} className="p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white transition-colors" title="Copy key">
+                  <Copy className="w-4 h-4"/>
+                </button>
+              </div>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4 text-xs">
+              <div><span className="text-zinc-500">Tenant ID</span><p className="text-zinc-300 font-mono mt-0.5">{apiKeyData.tid}</p></div>
+              <div><span className="text-zinc-500">Created</span><p className="text-zinc-300 mt-0.5">{new Date(apiKeyData.createdAt).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}</p></div>
+            </div>
+          </>)}
+          <div className="pt-2 border-t border-zinc-800">
+            <Button onClick={()=>setRevokeModal(true)} disabled={apiKeyLoading} variant="outline" className="border-red-800 text-red-400 hover:bg-red-900/20 hover:text-red-300 h-9">
+              <RefreshCw className="w-3.5 h-3.5 mr-1.5"/>Revoke &amp; Regenerate
+            </Button>
+          </div>
+        </div>
+
+        {/* Integration Snippets */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+          <h3 className="text-white font-semibold mb-4">Integration Snippets</h3>
+          <div className="flex gap-1 mb-4 border-b border-zinc-800">
+            {(["curl","js","python"] as const).map(t=>(<button key={t} onClick={()=>setApiSnippetTab(t)} className={`px-3 py-2 text-xs transition-colors border-b-2 -mb-px ${apiSnippetTab===t?"border-indigo-500 text-white":"border-transparent text-zinc-500 hover:text-zinc-300"}`}>{t==="js"?"JavaScript":t==="python"?"Python":"cURL"}</button>))}
+          </div>
+          {apiSnippetTab==="curl" && (<pre className="bg-zinc-800 rounded-lg p-4 text-xs text-zinc-300 overflow-x-auto whitespace-pre">{`curl -X POST https://auth-demo-rouge.vercel.app/api/auth/login \\
+  -H "X-API-Key: ${(apiKeyRevealed && fullApiKey) ? fullApiKey : (apiKeyData?.keyMasked || "YOUR_API_KEY")}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"email":"user@example.com","password":"...","deviceFingerprint":"..."}'`}</pre>)}
+          {apiSnippetTab==="js" && (<pre className="bg-zinc-800 rounded-lg p-4 text-xs text-zinc-300 overflow-x-auto whitespace-pre">{`// JavaScript SDK
+const uth = new UTHClient({
+  apiKey: '${(apiKeyRevealed && fullApiKey) ? fullApiKey : (apiKeyData?.keyMasked || "YOUR_API_KEY")}',
+  baseUrl: 'https://auth-demo-rouge.vercel.app'
+});
+
+const result = await uth.auth.login({
+  email,
+  password,
+  deviceFingerprint
+});`}</pre>)}
+          {apiSnippetTab==="python" && (<pre className="bg-zinc-800 rounded-lg p-4 text-xs text-zinc-300 overflow-x-auto whitespace-pre">{`# Python
+import uth_sdk
+
+client = uth_sdk.Client(
+    api_key="${(apiKeyRevealed && fullApiKey) ? fullApiKey : (apiKeyData?.keyMasked || "YOUR_API_KEY")}"
+)
+
+result = client.auth.login(
+    email=email,
+    password=password
+)`}</pre>)}
+        </div>
+      </div>)}
+
+      {/* Revoke confirmation modal */}
+      {revokeModal && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"><div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-md w-full mx-4 space-y-4">
+        <h3 className="text-white font-bold text-lg">Revoke &amp; Regenerate API Key?</h3>
+        <p className="text-zinc-400 text-sm">This will invalidate your current key. All integrations using this key will stop working immediately.</p>
+        <div className="flex gap-3 pt-2">
+          <Button onClick={()=>setRevokeModal(false)} variant="outline" className="flex-1 border-zinc-700 text-zinc-400 hover:text-white">Cancel</Button>
+          <Button onClick={regenerateKey} disabled={apiKeyLoading} className="flex-1 bg-red-600 hover:bg-red-700">{apiKeyLoading?"Regenerating…":"Revoke & Regenerate"}</Button>
+        </div>
+      </div></div>)}
     </div>
   </div>);
 }
