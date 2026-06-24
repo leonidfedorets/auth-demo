@@ -12,7 +12,7 @@ const PLANS = [
     id: "starter",
     name: "Starter",
     icon: Zap,
-    price: { monthly: 299, annual: 249 },
+    price: { monthly: 10, annual: 8 },
     mau: "10,000 MAU",
     rps: "100 req/s",
     description: "For startups and early-stage products that need solid auth without complexity.",
@@ -39,7 +39,7 @@ const PLANS = [
     id: "growth",
     name: "Growth",
     icon: Shield,
-    price: { monthly: 999, annual: 829 },
+    price: { monthly: 50, annual: 42 },
     mau: "100,000 MAU",
     rps: "500 req/s",
     description: "Full security stack for scaling products with compliance requirements.",
@@ -139,7 +139,7 @@ const FAQ = [
   { q: "Can I switch plans mid-month?", a: "Yes. Upgrades take effect immediately and are pro-rated. Downgrades take effect at the next billing cycle." },
   { q: "Is the free trial credit-card free?", a: "Yes. The 14-day trial requires no credit card. You get full access to the tier features you choose." },
   { q: "Do you offer on-premise deployment?", a: "Yes, for Enterprise customers. We support Docker, Kubernetes, and bare-metal deployment with Go binary releases." },
-  { q: "How do I integrate with my existing user database?", a: "The Auth Service supports BYOD (Bring Your Own Database) — you can federate your existing PostgreSQL users via our migration endpoint or use our webhook to sync." },
+  { q: "How do I integrate with my existing user database?", a: "The UTH supports BYOD (Bring Your Own Database) — you can federate your existing PostgreSQL users via our migration endpoint or use our webhook to sync." },
   { q: "What is the 50/50 risk model?", a: "FinalRiskScore = (AuthRiskScore × 0.5) + (EngineRiskScore × 0.5). Auth Risk evaluates device and network signals; Engine Risk evaluates account, session, operation, and SCA quality signals." },
 ];
 
@@ -151,7 +151,7 @@ export default function PricingPage() {
     <div className="min-h-screen bg-zinc-950 text-white">
       {/* Nav */}
       <nav className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between sticky top-0 bg-zinc-950/90 backdrop-blur z-40">
-        <Link href="/" className="flex items-center gap-2 font-bold text-white"><Shield className="h-5 w-5 text-indigo-400" />AuthService</Link>
+        <Link href="/" className="flex items-center gap-2.5 font-bold text-white"><div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center"><span className="font-black text-white text-xs">UTH</span></div><span className="font-black tracking-tighter text-lg"><span className="text-indigo-400">U</span><span className="text-indigo-300">T</span><span className="text-indigo-200">H</span></span></Link>
         <div className="flex items-center gap-4">
           <Link href="/platform/risk-engine" className="text-zinc-400 hover:text-white text-sm transition-colors">Platform</Link>
           <Link href="/onboarding"><Button className="bg-indigo-600 hover:bg-indigo-700 h-8 text-sm">Get started</Button></Link>
@@ -209,7 +209,7 @@ export default function PricingPage() {
                 </ul>
               </div>
               <div className="mt-6">
-                <Link href={plan.id === "enterprise" ? "mailto:sales@auth-service.io" : "/onboarding"}>
+                <Link href={plan.id === "enterprise" ? "mailto:sales@uth.io" : "/onboarding"}>
                   <Button className={`w-full h-11 ${plan.id === "growth" ? "bg-indigo-600 hover:bg-indigo-700" : "bg-zinc-800 hover:bg-zinc-700 text-white"}`}>
                     {plan.cta} <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>

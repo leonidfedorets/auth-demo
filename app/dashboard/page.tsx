@@ -1,33 +1,102 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { toast } from "sonner";
 import {
-  Shield, Key, Smartphone, Activity, LogOut, ChevronRight,
-  Copy, CheckCircle, User, Layers, Globe, FileText, Lock
+  Activity, Shield, Key, Smartphone, Users, Monitor,
+  ChevronRight, FileText, Globe, Lock, BarChart2, Zap,
+  AlertTriangle, Cpu
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
-import RiskBadge from "@/components/demo/RiskBadge";
-import JWTInspector from "@/components/demo/JWTInspector";
 
-const PLATFORM_LINKS = [
-  { icon: Activity, title: "Risk Engine", desc: "Auth Risk + Engine Risk evaluation", href: "/platform/risk-engine", color: "text-yellow-400", badge: "Live" },
-  { icon: Shield, title: "SCA / PSD2", desc: "Step-up auth and challenge management", href: "/platform/sca", color: "text-red-400", badge: "PSD2" },
-  { icon: Key, title: "Passkeys", desc: "WebAuthn / FIDO2 credential management", href: "/platform/passkeys", color: "text-purple-400", badge: "FIDO2 L2" },
-  { icon: Smartphone, title: "Device Attestation", desc: "Device trust signals and binding", href: "/platform/device-attestation", color: "text-green-400", badge: "TPM" },
+function DashNav({ user, currentPath }: { user: any; currentPath: string }) {
+  const [showMenu, setShowMenu] = useState(false);
+  const NAV_ITEMS = [
+    { href: "/dashboard", label: "Overview" },
+    { href: "/dashboard/transactions", label: "Transactions" },
+    { href: "/dashboard/users", label: "Users" },
+    { href: "/dashboard/devices", label: "Devices" },
+    { href: "/dashboard/sessions", label: "Sessions" },
+    { href: "/dashboard/audit", label: "Audit Log" },
+    { href: "/dashboard/risk-rules", label: "Risk Rules" },
+    { href: "/dashboard/settings", label: "Settings" },
+  ];
+  return (
+    <nav className="border-b border-zinc-800 px-4 py-0 flex items-center bg-zinc-950 sticky top-0 z-40 h-11">
+      <Link href="/" className="flex items-center gap-1.5 mr-5 shrink-0">
+        <div className="w-5 h-5 rounded bg-indigo-600 flex items-center justify-center"><span className="font-black text-white text-[9px]">UTH</span></div>
+        <span className="font-black text-sm tracking-tighter hidden sm:block"><span className="text-indigo-400">U</span><span className="text-indigo-300">T</span><span className="text-indigo-200">H</span></span>
+      </Link>
+      <div className="flex items-center gap-0.5 overflow-x-auto flex-1">
+        {NAV_ITEMS.map(item => (
+          <Link key={item.href} href={item.href} className={`px-3 py-2.5 text-xs whitespace-nowrap transition-colors border-b-2 -mb-px ${currentPath === item.href ? "border-indigo-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>
+            {item.label}
+          </Link>
+        ))}
+      </div>
+      <div className="relative ml-3 shrink-0">
+        <button onClick={() => setShowMenu(!showMenu)} className="flex items-center gap-2 text-xs text-zinc-400 hover:text-white cursor-pointer">
+          <div className="w-7 h-7 rounded-full bg-indigo-700 flex items-center justify-center text-white font-bold text-xs">
+            {user?.email?.[0]?.toUpperCase() || "?"}
+          </div>
+          <span className="hidden sm:block max-w-[120px] truncate">{user?.email}</span>
+        </button>
+        {showMenu && (
+          <div className="absolute right-0 top-9 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-48 z-50 py-1">
+            <div className="px-3 py-2 border-b border-zinc-800"><p className="text-white text-xs font-semibold truncate">{user?.email}</p><p className="text-zinc-500 text-[10px] font-mono truncate">{user?.id}</p></div>
+            <Link href="/dashboard" onClick={() => setShowMenu(false)} className="block px-3 py-2 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs">Dashboard</Link>
+            <Link href="/dashboard/settings" onClick={() => setShowMenu(false)} className="block px-3 py-2 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs">Settings</Link>
+            <button onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }} className="w-full text-left px-3 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 text-xs border-t border-zinc-800 cursor-pointer">Sign out</button>
+          </div>
+        )}
+      </div>
+    </nav>
+  );
+}
+
+const SPARKBAR_HEIGHTS = [35, 22, 50, 42, 58, 47, 56];
+
+function Sparkline({ data }: { data: number[] }) {
+  const max = Math.max(...data);
+  return (
+    <div className="flex items-end gap-0.5 h-8 mt-2">
+      {data.map((v, i) => (
+        <div
+          key={i}
+          className="flex-1 rounded-sm bg-indigo-500/60"
+          style={{ height: `${Math.round((v / max) * 100)}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+const PLATFORM_FEATURES = [
+  { icon: Activity, title: "Risk Engine", desc: "Real-time auth risk scoring and policy evaluation for every login event.", href: "/platform/risk-engine", color: "text-yellow-400", badge: "Live" },
+  { icon: Shield, title: "SCA / PSD2", desc: "Strong Customer Authentication and step-up challenge management.", href: "/platform/sca", color: "text-red-400", badge: "PSD2" },
+  { icon: Key, title: "WebAuthn / Passkeys", desc: "FIDO2 Level 2 passkey registration and passwordless authentication.", href: "/platform/passkeys", color: "text-purple-400", badge: "FIDO2 L2" },
+  { icon: Smartphone, title: "Device Attestation", desc: "Cryptographic device trust signals via Apple/Android/TPM attestation.", href: "/platform/device-attestation", color: "text-green-400", badge: "TPM" },
+  { icon: Lock, title: "Device Binding", desc: "Bind user identities to verified devices for step-up enforcement.", href: "/platform/device-binding", color: "text-cyan-400", badge: "Binding" },
+  { icon: Cpu, title: "Engine Risk", desc: "Behavioral risk signals — velocity, geo anomaly, device reputation.", href: "/platform/engine-risk", color: "text-orange-400", badge: "ML" },
+];
+
+const QUICK_LINKS = [
+  { icon: BarChart2, label: "Transactions", count: "1,247", href: "/dashboard/transactions" },
+  { icon: Users, label: "Users", count: "89", href: "/dashboard/users" },
+  { icon: Monitor, label: "Devices", count: "143", href: "/dashboard/devices" },
+  { icon: Globe, label: "Sessions", count: "34", href: "/dashboard/sessions" },
+  { icon: FileText, label: "Audit Log", count: "15 today", href: "/dashboard/audit" },
+  { icon: AlertTriangle, label: "Risk Rules", count: "12 active", href: "/dashboard/risk-rules" },
+  { icon: Zap, label: "Settings", count: "Configure", href: "/dashboard/settings" },
 ];
 
 export default function DashboardPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
   const [claims, setClaims] = useState<any>(null);
+  const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me").then(async r => {
@@ -35,175 +104,108 @@ export default function DashboardPage() {
       const data = await r.json();
       setUser(data.user);
       setClaims(data.claims);
+    });
+    fetch("/api/admin/stats").then(async r => {
+      if (r.ok) setStats(await r.json());
       setLoading(false);
     });
   }, [router]);
 
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    toast.success("Signed out");
-    router.push("/login");
-  }
-
-  function copyUserId() {
-    if (claims?.sub) {
-      navigator.clipboard.writeText(claims.sub);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }
-  }
-
-  if (loading) return (
+  if (!user && loading) return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
       <div className="w-6 h-6 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
-  const acrLabel: Record<string, string> = { gold: "Gold (hardware key)", silver: "Silver (MFA)", bronze: "Bronze (password)" };
+  const planBadgeClass = "bg-indigo-500/15 text-indigo-300 border-indigo-500/30";
+  const tenantName = user?.email?.split("@")[0] ?? "Tenant";
+  const tenantId = claims?.tid ?? claims?.sub?.slice(0, 8) ?? "—";
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
-      {/* Nav */}
-      <nav className="border-b border-white/8 px-6 py-4 flex items-center justify-between sticky top-0 bg-zinc-950/90 backdrop-blur-xl z-40">
-        <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-indigo-400" />
-            <span className="font-bold text-white">AuthService</span>
-          </Link>
-          <div className="hidden md:flex items-center gap-4 text-sm">
-            <Link href="/dashboard" className="text-white font-medium">Overview</Link>
-            <Link href="/dashboard/sessions" className="text-zinc-400 hover:text-white transition-colors">Sessions</Link>
-            <Link href="/dashboard/devices" className="text-zinc-400 hover:text-white transition-colors">Devices</Link>
-            <Link href="/dashboard/audit" className="text-zinc-400 hover:text-white transition-colors">Audit log</Link>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-sm text-zinc-400">
-            <div className="w-2 h-2 rounded-full bg-green-400" />
-            {user?.email}
-          </div>
-          <Button variant="ghost" size="sm" onClick={logout} className="text-zinc-400 hover:text-white">
-            <LogOut className="w-4 h-4" />
-          </Button>
-        </div>
-      </nav>
+      <DashNav user={user} currentPath={pathname} />
 
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
-              <User className="w-5 h-5 text-indigo-400" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-white">
-                {user?.display_name ?? user?.email?.split("@")[0]}
-              </h1>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-zinc-500 font-mono">{claims?.sub?.slice(0, 20)}…</span>
-                <button onClick={copyUserId} className="cursor-pointer text-zinc-600 hover:text-zinc-400 transition-colors">
-                  {copied ? <CheckCircle className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-                </button>
-              </div>
-            </div>
-            {claims?.risk !== undefined && (
-              <RiskBadge score={claims.risk} level={claims.risk_lvl} />
-            )}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+        {/* Tenant identity card */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+            <span className="text-indigo-300 font-black text-lg uppercase">{tenantName[0]}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="border-green-500/30 text-green-400 text-xs">
-              Active session
-            </Badge>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <h1 className="text-base font-bold text-white capitalize">{tenantName}</h1>
+              <Badge className={`text-[10px] border ${planBadgeClass}`}>Starter Plan</Badge>
+              <Badge className="text-[10px] bg-green-500/10 text-green-400 border-green-500/30">Active</Badge>
+            </div>
+            <p className="text-zinc-500 text-xs font-mono truncate">Tenant ID: {tenantId}</p>
+            <p className="text-zinc-500 text-xs mt-0.5">{user?.email}</p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-zinc-600 text-[10px] uppercase tracking-wide">API Environment</p>
+            <p className="text-green-400 text-xs font-mono mt-0.5">production</p>
           </div>
         </div>
 
-        <Tabs defaultValue="overview">
-          <TabsList className="bg-zinc-900 border border-white/8 mb-8">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="token">Token</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="overview" className="space-y-6">
-            {/* Session summary */}
-            <div className="grid sm:grid-cols-3 gap-4">
-              {[
-                {
-                  label: "Auth Methods (AMR)",
-                  value: <div className="flex gap-1 flex-wrap mt-1">{(claims?.amr ?? []).map((m: string) => (
-                    <Badge key={m} variant="secondary" className="text-xs capitalize">{m}</Badge>
-                  ))}</div>,
-                },
-                {
-                  label: "Assurance Level (ACR)",
-                  value: <div className="mt-1"><Badge variant="outline" className="border-indigo-500/30 text-indigo-400 text-xs">{acrLabel[claims?.acr ?? ""] ?? claims?.acr ?? "—"}</Badge></div>,
-                },
-                {
-                  label: "SCA Status",
-                  value: <div className="mt-1">
-                    <Badge className={claims?.sca ? "bg-green-600 text-white border-0 text-xs" : "bg-zinc-700 text-zinc-300 border-0 text-xs"}>
-                      {claims?.sca ? `Completed · ${claims.sca_method}` : "Not required"}
-                    </Badge>
-                  </div>,
-                },
-              ].map(item => (
-                <Card key={item.label} className="bg-zinc-900 border-white/8">
-                  <CardContent className="p-4">
-                    <p className="text-zinc-500 text-xs">{item.label}</p>
-                    {item.value}
-                  </CardContent>
-                </Card>
-              ))}
+        {/* KPI grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: "Total Transactions", value: stats?.totalTransactions?.toLocaleString() ?? "—", sparkline: stats?.txLast7Days, sub: "+12% vs last week" },
+            { label: "Total Users", value: stats?.totalUsers?.toLocaleString() ?? "—", sparkline: null, sub: "unique identities" },
+            { label: "Bound Devices", value: stats?.boundDevices?.toLocaleString() ?? "—", sparkline: null, sub: "across all users" },
+            { label: "Active Sessions", value: stats?.activeSessions?.toLocaleString() ?? "—", sparkline: null, sub: "right now" },
+          ].map(kpi => (
+            <div key={kpi.label} className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+              <p className="text-zinc-500 text-[10px] uppercase tracking-wide">{kpi.label}</p>
+              <p className="text-2xl font-black text-white mt-1">{kpi.value}</p>
+              {kpi.sparkline ? (
+                <Sparkline data={kpi.sparkline} />
+              ) : (
+                <p className="text-zinc-600 text-[10px] mt-2">{kpi.sub}</p>
+              )}
+              {kpi.sparkline && <p className="text-zinc-600 text-[10px] mt-1">{kpi.sub}</p>}
             </div>
+          ))}
+        </div>
 
-            {/* Platform features */}
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">Platform</h2>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {PLATFORM_LINKS.map(c => (
-                  <Link key={c.title} href={c.href}>
-                    <Card className="bg-zinc-900 border-white/8 hover:border-white/16 hover:bg-zinc-800/60 transition-all cursor-pointer h-full">
-                      <CardContent className="p-5">
-                        <div className="flex items-start justify-between mb-3">
-                          <c.icon className={`w-5 h-5 ${c.color}`} />
-                          <Badge variant="outline" className="text-xs border-white/10 text-zinc-500">{c.badge}</Badge>
-                        </div>
-                        <h3 className="font-semibold text-white text-sm mb-1">{c.title}</h3>
-                        <p className="text-xs text-zinc-500">{c.desc}</p>
-                        <div className="mt-3 flex items-center gap-1 text-xs text-indigo-400">
-                          Open <ChevronRight className="w-3 h-3" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ))}
-              </div>
-            </div>
+        {/* Platform Playground */}
+        <div>
+          <div className="mb-4">
+            <h2 className="text-sm font-bold text-white">Platform Playground</h2>
+            <p className="text-zinc-500 text-xs mt-0.5">Test each feature flow — production requests appear in Transactions</p>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {PLATFORM_FEATURES.map(f => (
+              <Link key={f.title} href={f.href} className="rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 hover:bg-zinc-800/60 transition-all cursor-pointer p-4 flex flex-col gap-3">
+                <div className="flex items-start justify-between">
+                  <f.icon className={`w-5 h-5 ${f.color}`} />
+                  <Badge variant="outline" className="text-[10px] border-zinc-700 text-zinc-500">{f.badge}</Badge>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-white">{f.title}</h3>
+                  <p className="text-xs text-zinc-500 mt-0.5 leading-relaxed">{f.desc}</p>
+                </div>
+                <div className="flex items-center gap-1 text-xs text-indigo-400 mt-auto">
+                  Open Playground <ChevronRight className="w-3 h-3" />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
 
-            {/* Quick nav */}
-            <div className="grid sm:grid-cols-3 gap-3">
-              {[
-                { icon: FileText, label: "Audit log", href: "/dashboard/audit", desc: "View all auth events" },
-                { icon: Globe, label: "Sessions", href: "/dashboard/sessions", desc: "Manage active sessions" },
-                { icon: Lock, label: "Devices", href: "/dashboard/devices", desc: "Trusted device list" },
-              ].map(item => (
-                <Link key={item.label} href={item.href}>
-                  <div className="flex items-center gap-3 rounded-xl border border-white/8 bg-zinc-900 hover:bg-zinc-800/60 hover:border-white/16 transition-all p-4 cursor-pointer">
-                    <item.icon className="w-4 h-4 text-zinc-400 shrink-0" />
-                    <div>
-                      <div className="text-white text-sm font-medium">{item.label}</div>
-                      <div className="text-zinc-500 text-xs">{item.desc}</div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-zinc-600 ml-auto" />
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="token">
-            <JWTInspector />
-          </TabsContent>
-        </Tabs>
+        {/* Quick links */}
+        <div>
+          <h2 className="text-sm font-bold text-white mb-3">Quick Links</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {QUICK_LINKS.map(q => (
+              <Link key={q.label} href={q.href} className="rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 hover:bg-zinc-800/60 transition-all cursor-pointer p-3 flex flex-col items-center text-center gap-1.5">
+                <q.icon className="w-4 h-4 text-indigo-400" />
+                <p className="text-white text-xs font-medium">{q.label}</p>
+                <p className="text-zinc-500 text-[10px]">{q.count}</p>
+              </Link>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ const PLANS = [
 ];
 
 const CODE_EXAMPLES = {
-  register: `curl -X POST https://api.auth-service.io/v1/auth/register \\
+  register: `curl -X POST https://api.uth.io/v1/auth/register \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
@@ -22,7 +22,7 @@ const CODE_EXAMPLES = {
     "password": "SecurePassword123!",
     "tenantId": "YOUR_TENANT_ID"
   }'`,
-  login: `curl -X POST https://api.auth-service.io/v1/auth/login \\
+  login: `curl -X POST https://api.uth.io/v1/auth/login \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
@@ -30,7 +30,7 @@ const CODE_EXAMPLES = {
     "password": "SecurePassword123!",
     "deviceFingerprint": "auto"
   }'`,
-  risk: `curl -X POST https://api.auth-service.io/v1/risk/evaluate \\
+  risk: `curl -X POST https://api.uth.io/v1/risk/evaluate \\
   -H "Authorization: Bearer JWT_TOKEN" \\
   -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
@@ -78,7 +78,7 @@ export default function OnboardingPage() {
       const r = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: `trial+${Date.now()}@auth-service.io`, password: "Trial123456!" }),
+        body: JSON.stringify({ email: `trial+${Date.now()}@uth.io`, password: "Trial123456!" }),
       });
       const data = await r.json();
       setTestResult({ ok: r.ok, data });
@@ -91,7 +91,7 @@ export default function OnboardingPage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <nav className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between sticky top-0 bg-zinc-950/90 backdrop-blur z-40">
-        <Link href="/" className="flex items-center gap-2 font-bold text-white"><Shield className="h-5 w-5 text-indigo-400" />AuthService</Link>
+        <Link href="/" className="flex items-center gap-2 font-bold text-white"><Shield className="h-5 w-5 text-indigo-400" />UTH</Link>
         <div className="flex items-center gap-4 text-sm text-zinc-400">
           <span>Step {step} of {STEPS.length}</span>
           <Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link>
@@ -246,9 +246,9 @@ export default function OnboardingPage() {
             </div>
             <div className="space-y-4">
               {[
-                { lang: "Node.js / TypeScript", cmd: "npm install @auth-service/sdk", pkg: "npm" },
-                { lang: "Python", cmd: "pip install auth-service", pkg: "pip" },
-                { lang: "Go", cmd: "go get github.com/auth-service/go-sdk", pkg: "go" },
+                { lang: "Node.js / TypeScript", cmd: "npm install @uth/sdk", pkg: "npm" },
+                { lang: "Python", cmd: "pip install uth", pkg: "pip" },
+                { lang: "Go", cmd: "go get github.com/uth/go-sdk", pkg: "go" },
               ].map(item => (
                 <div key={item.lang} className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900/80">
@@ -268,8 +268,8 @@ export default function OnboardingPage() {
                 <div className="relative p-4">
                   <pre className="text-green-400 font-mono text-sm">{`AUTH_SERVICE_API_KEY=${apiKey}
 AUTH_SERVICE_TENANT_ID=${tenantId}
-AUTH_SERVICE_BASE_URL=https://api.auth-service.io/v1`}</pre>
-                  <CopyButton text={`AUTH_SERVICE_API_KEY=${apiKey}\nAUTH_SERVICE_TENANT_ID=${tenantId}\nAUTH_SERVICE_BASE_URL=https://api.auth-service.io/v1`} />
+AUTH_SERVICE_BASE_URL=https://api.uth.io/v1`}</pre>
+                  <CopyButton text={`AUTH_SERVICE_API_KEY=${apiKey}\nAUTH_SERVICE_TENANT_ID=${tenantId}\nAUTH_SERVICE_BASE_URL=https://api.uth.io/v1`} />
                 </div>
               </div>
             </div>

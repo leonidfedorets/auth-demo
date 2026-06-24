@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     limits: planLimits[selectedPlan as keyof typeof planLimits] ?? planLimits.starter,
     createdAt: new Date().toISOString(),
     configExample: {
-      baseUrl: "https://auth-service.yourdomain.com",
+      baseUrl: "https://uth.yourdomain.com",
       tenantId,
       headers: { "X-Tenant-ID": tenantId, "Authorization": `Bearer ${apiKey}` },
     },

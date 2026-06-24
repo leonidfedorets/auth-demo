@@ -9,7 +9,7 @@ import {
 import type { AuthenticatorTransportFuture } from "@simplewebauthn/types";
 
 const rpID = process.env.WEBAUTHN_RP_ID ?? "localhost";
-const rpName = process.env.WEBAUTHN_RP_NAME ?? "AuthService";
+const rpName = process.env.WEBAUTHN_RP_NAME ?? "UTH";
 const origin = process.env.WEBAUTHN_ORIGIN ?? "http://localhost:3000";
 
 export async function POST(req: NextRequest) {

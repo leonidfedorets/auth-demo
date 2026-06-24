@@ -6,9 +6,10 @@ import { Toaster } from "sonner";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "AuthService — Enterprise Authentication Platform",
-  description: "Production-grade authentication infrastructure. JWT, WebAuthn/Passkeys, Device Attestation, Adaptive Risk Engine, PSD2 SCA. PCI DSS v4.0 · GDPR · FIDO2 L2 compliant.",
-  keywords: ["authentication", "JWT", "WebAuthn", "passkeys", "SCA", "PSD2", "FIDO2", "risk engine", "device attestation"],
+  title: "UTH — Authentication Infrastructure by Empatix",
+  description: "UTH is a production-grade authentication platform by Empatix. JWT sessions, WebAuthn/Passkeys, Device Attestation, Adaptive Risk Engine, and PSD2/SCA compliance — as a single API. PCI DSS v4.0 · GDPR · FIDO2 L2.",
+  keywords: ["UTH", "authentication", "JWT", "WebAuthn", "passkeys", "SCA", "PSD2", "FIDO2", "risk engine", "device attestation", "Empatix"],
+  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

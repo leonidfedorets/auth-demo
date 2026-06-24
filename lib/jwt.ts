@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
 
 const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "fallback-dev-secret-32-chars-min");
-const issuer = process.env.JWT_ISSUER ?? "auth-service-demo";
+const issuer = process.env.JWT_ISSUER ?? "uth-demo";
 const accessTTL = parseInt(process.env.JWT_ACCESS_TTL ?? "900");
 const refreshTTL = parseInt(process.env.JWT_REFRESH_TTL ?? "2592000");
 

@@ -1,83 +1,85 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getClientIP } from "@/lib/auth";
-
-const TOR_PREFIXES = ["185.220.", "185.107.", "199.87.", "162.247.", "171.25.", "176.10."];
-const VPN_PREFIXES = ["104.16.", "172.64.", "104.17.", "104.18.", "104.19.", "103.21."];
-
-const DEFAULT_WEIGHTS: Record<string, number> = {
-  tor_exit_node: 60,
-  vpn_detected: 25,
-  impossible_travel: 50,
-  new_device: 20,
-  geo_anomaly: 30,
-  failed_logins_3: 25,
-  failed_logins_5: 40,
-  failed_logins_10: 70,
-  suspicious_ua: 8,
-  headless_browser: 45,
-};
-
-const DEFAULT_THRESHOLDS = { low: 30, medium: 60, high: 85, block: 100 };
+import { verifyToken } from "@/lib/jwt";
 
 export async function POST(req: NextRequest) {
-  const realIp = getClientIP(req);
+  const token = req.cookies.get("access_token")?.value;
+  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const claims = await verifyToken(token);
+  if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
   const body = await req.json().catch(() => ({}));
+  const {
+    context = "operation", // "login" | "operation" | "payment" | "account_change"
+    operationType,
+    amount,
+    currency,
+    signals = {},
+    ip,
+    userId,
+    sessionId,
+    metadata = {},
+  } = body;
 
-  const ip: string = body.ip ?? realIp;
-  const ua: string = body.userAgent ?? req.headers.get("user-agent") ?? "";
-  const country: string = body.country ?? "US";
-  const previousCountry: string = body.previousCountry ?? country;
-  const isNewDevice: boolean = body.isNewDevice ?? false;
-  const failedLogins: number = body.failedLogins ?? 0;
+  // Device Trust Layer
+  let deviceScore = 0;
+  if (signals.knownDevice === false) deviceScore += 35;
+  if (signals.deviceHealthy === false) deviceScore += 25;
+  if (signals.biometricUsed === false && context !== "login") deviceScore += 15;
+  if (signals.screenLockEnabled === false) deviceScore += 10;
+  if (signals.developerMode === true) deviceScore += 20;
+  if (signals.rootedDevice === true) deviceScore += 35;
+  if (signals.vpnDetected === true) deviceScore += 10;
+  if (signals.torExitNode === true) deviceScore += 30;
+  if (signals.highRiskCountry === true) deviceScore += 20;
+  if (signals.ipReputationClean === false) deviceScore += 10;
+  if (signals.asnResidential === false) deviceScore += 5;
 
-  const weights: Record<string, number> = { ...DEFAULT_WEIGHTS, ...(body.weights ?? {}) };
-  const thresholds = { ...DEFAULT_THRESHOLDS, ...(body.thresholds ?? {}) };
+  // Operation risk layer
+  let opScore = 0;
+  if (context === "payment") {
+    const amt = parseFloat(amount) || 0;
+    if (amt > 10000) opScore += 30;
+    else if (amt > 1000) opScore += 15;
+    else if (amt > 100) opScore += 5;
+  }
+  if (operationType === "account_change") opScore += 20;
+  if (operationType === "data_export") opScore += 25;
 
-  const signals: { name: string; score: number; description: string }[] = [];
+  const rawScore = Math.min(100, deviceScore + opScore);
 
-  if (TOR_PREFIXES.some(p => ip.startsWith(p))) {
-    signals.push({ name: "tor_exit_node", score: weights.tor_exit_node, description: "Request from known Tor exit node IP" });
-  }
-  if (VPN_PREFIXES.some(p => ip.startsWith(p)) && !TOR_PREFIXES.some(p => ip.startsWith(p))) {
-    signals.push({ name: "vpn_detected", score: weights.vpn_detected, description: "IP matches known VPN/proxy range" });
-  }
-  if (country !== previousCountry && previousCountry) {
-    signals.push({ name: "impossible_travel", score: weights.impossible_travel, description: `Login from ${country} but last seen in ${previousCountry}` });
-  } else if (country !== "US" && country !== previousCountry) {
-    signals.push({ name: "geo_anomaly", score: weights.geo_anomaly, description: `Unusual country: ${country}` });
-  }
-  if (isNewDevice) {
-    signals.push({ name: "new_device", score: weights.new_device, description: "Device fingerprint not seen before" });
-  }
-  if (failedLogins >= 10) {
-    signals.push({ name: "failed_logins_10", score: weights.failed_logins_10, description: `${failedLogins} failed logins in last hour` });
-  } else if (failedLogins >= 5) {
-    signals.push({ name: "failed_logins_5", score: weights.failed_logins_5, description: `${failedLogins} failed logins in last hour` });
-  } else if (failedLogins >= 3) {
-    signals.push({ name: "failed_logins_3", score: weights.failed_logins_3, description: `${failedLogins} failed logins in last hour` });
-  }
-  const uaLower = ua.toLowerCase();
-  if (uaLower.includes("headlesschrome") || uaLower.includes("phantomjs") || uaLower.includes("puppeteer") || uaLower.includes("playwright")) {
-    signals.push({ name: "headless_browser", score: weights.headless_browser, description: "Headless/automated browser detected" });
-  } else if (!uaLower.includes("mozilla") && !uaLower.includes("apple") && ua.length > 0) {
-    signals.push({ name: "suspicious_ua", score: weights.suspicious_ua, description: "Non-browser user agent detected" });
-  }
+  let level = "low";
+  if (rawScore > 75) level = "critical";
+  else if (rawScore > 50) level = "high";
+  else if (rawScore > 25) level = "medium";
 
-  const score = Math.min(100, signals.reduce((acc, s) => acc + s.score, 0));
+  let decision = "ALLOW";
+  if (signals.torExitNode) { decision = "DENY"; }
+  else if (signals.rootedDevice) { decision = "DENY"; }
+  else if (rawScore > 75) decision = "DENY";
+  else if (rawScore > 40) decision = "STEP_UP";
 
-  let level: string;
-  let decision: string;
-  if (score >= thresholds.block) {
-    level = "critical"; decision = "block";
-  } else if (score >= thresholds.high) {
-    level = "high"; decision = "challenge";
-  } else if (score >= thresholds.medium) {
-    level = "high"; decision = "mfa_required";
-  } else if (score >= thresholds.low) {
-    level = "medium"; decision = "step_up";
-  } else {
-    level = "low"; decision = "allow";
-  }
+  const triggeredSignals = [];
+  if (signals.torExitNode) triggeredSignals.push({ code: "TOR", description: "Tor exit node", weight: 30 });
+  if (signals.rootedDevice) triggeredSignals.push({ code: "ROOT", description: "Rooted/jailbroken", weight: 35 });
+  if (signals.developerMode) triggeredSignals.push({ code: "DEV", description: "Developer mode", weight: 20 });
+  if (signals.vpnDetected) triggeredSignals.push({ code: "VPN", description: "VPN active", weight: 10 });
+  if (signals.highRiskCountry) triggeredSignals.push({ code: "GEO", description: "High-risk country", weight: 20 });
 
-  return NextResponse.json({ score, level, decision, signals, thresholds, ip });
+  return NextResponse.json({
+    evaluationId: `eval-${Date.now()}`,
+    context,
+    operationType,
+    score: rawScore,
+    level,
+    decision,
+    triggeredSignals,
+    layers: { deviceTrust: deviceScore, operationRisk: opScore },
+    requiredAction: decision === "STEP_UP" ? "sca" : null,
+    scaMethod: decision === "STEP_UP" ? "totp" : null,
+    jwtClaims: { risk: rawScore, risk_lvl: level },
+    evaluatedAt: new Date().toISOString(),
+    userId: userId || claims.sub,
+    sessionId: sessionId || claims.sid,
+    tenantId: claims.tid || "default",
+  });
 }

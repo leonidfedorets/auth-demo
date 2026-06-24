@@ -1,19 +1,25 @@
 import Link from "next/link";
-import { Shield } from "lucide-react";
-export default function Page() {
-  return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col">
-      <nav className="border-b border-white/8 px-6 py-4 flex items-center gap-2">
-        <Shield className="w-5 h-5 text-indigo-400" />
-        <Link href="/" className="font-bold text-white">AuthService</Link>
-      </nav>
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center space-y-3 max-w-sm">
-          <h1 className="text-2xl font-black text-white">Coming soon</h1>
-          <p className="text-zinc-400 text-sm">This page is being prepared.</p>
-          <Link href="/" className="text-indigo-400 hover:underline text-sm">← Back home</Link>
-        </div>
-      </div>
-    </div>
-  );
+function Nav() {
+  return (<nav className="border-b border-white/8 px-6 py-4 flex items-center justify-between sticky top-0 bg-zinc-950/90 backdrop-blur-xl z-50"><Link href="/" className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center"><span className="font-black text-white text-xs">UTH</span></div><span className="font-black tracking-tighter text-lg"><span className="text-indigo-400">U</span><span className="text-indigo-300">T</span><span className="text-indigo-200">H</span></span></Link><div className="flex gap-4 text-sm text-zinc-400"><Link href="/gdpr" className="hover:text-white">GDPR</Link><Link href="/privacy" className="hover:text-white">Privacy</Link></div></nav>);
+}
+const SCHEDULE_1 = [
+  { label: "Subject-matter", value: "Processing of personal data on behalf of the Customer in connection with use of the UTH authentication platform." },
+  { label: "Duration", value: "For the duration of the Customer's subscription agreement with Empatixtech, plus any statutory retention periods thereafter." },
+  { label: "Nature and purpose", value: "Authenticating end users, issuing JWT sessions, evaluating authentication risk, logging events for audit purposes, enabling SCA/PSD2 compliance." },
+  { label: "Type of personal data", value: "Email address, hashed password, device fingerprint, IP address, geolocation (country/city level), authentication timestamps, MFA method." },
+  { label: "Categories of data subjects", value: "End users of the Customer's product(s) who authenticate via the UTH platform." },
+];
+export default function DPAPage() {
+  return (<div className="min-h-screen bg-zinc-950 text-white"><Nav /><div className="max-w-3xl mx-auto px-6 py-16">
+    <div className="mb-12"><div className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Legal · Empatixtech</div><h1 className="text-4xl font-black text-white mb-3">Data Processing Agreement</h1><p className="text-zinc-500 text-sm">Version 1.0 — Effective 01 April 2025</p></div>
+    <p className="text-zinc-400 text-sm leading-relaxed mb-8">This Data Processing Agreement ("DPA") forms part of the subscription agreement between Empatixtech (Empatixtech SIA, Pērnavas iela 21–22, Rīga, LV-1009, Latvia; "Processor") and the Customer ("Controller"). It governs the processing of personal data by Empatixtech on behalf of the Customer in connection with the UTH authentication platform.</p>
+    <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">1. Definitions</h2><div className="space-y-3 text-zinc-400 text-sm"><p>"<strong className="text-zinc-300">Personal Data</strong>" means any information relating to an identified or identifiable natural person.</p><p>"<strong className="text-zinc-300">Processing</strong>" has the meaning given in the GDPR.</p><p>"<strong className="text-zinc-300">Sub-processor</strong>" means any third party engaged by Empatixtech to process Personal Data on behalf of the Customer.</p></div></section>
+    <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">2. Processor obligations</h2><div className="space-y-2 text-zinc-400 text-sm"><p>Empatixtech shall: (a) process Personal Data only on documented instructions from the Customer; (b) ensure that persons authorised to process Personal Data are bound by confidentiality; (c) implement appropriate technical and organisational security measures (Article 32 GDPR); (d) assist the Customer in fulfilling its obligations regarding data subject rights; (e) notify the Customer without undue delay upon becoming aware of a personal data breach; (f) at the Customer's election, delete or return all Personal Data upon termination; (g) provide all information necessary to demonstrate compliance with this DPA and allow for audits.</p></div></section>
+    <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">3. Sub-processors</h2><p className="text-zinc-400 text-sm leading-relaxed">The Customer grants Empatixtech general written authorisation to engage sub-processors. Current sub-processors include: <strong className="text-zinc-300">Neon Inc.</strong> (PostgreSQL database hosting, USA — SCCs applied), <strong className="text-zinc-300">Upstash Inc.</strong> (Redis session storage, USA — SCCs applied), <strong className="text-zinc-300">Vercel Inc.</strong> (compute/CDN, USA — SCCs applied). Empatixtech will notify the Customer of any intended sub-processor changes with at least 10 days' notice.</p></section>
+    <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">4. International transfers</h2><p className="text-zinc-400 text-sm leading-relaxed">Where Personal Data is transferred outside the EU/EEA, Empatixtech relies on the EU Standard Contractual Clauses (SCCs) or other approved safeguards under Chapter V GDPR. Copies of SCCs are available on request.</p></section>
+    <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">Schedule 1 — Processing details</h2>
+      <div className="space-y-3">{SCHEDULE_1.map(row => (<div key={row.label} className="rounded-lg border border-zinc-800 bg-zinc-900 p-4"><p className="text-xs text-zinc-500 uppercase tracking-wide mb-1">{row.label}</p><p className="text-zinc-300 text-sm">{row.value}</p></div>))}</div>
+    </section>
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 text-sm text-zinc-400"><strong className="text-white">Request a signed DPA: </strong><a href="mailto:sales@empatixtech.com" className="text-indigo-400 hover:underline">sales@empatixtech.com</a></div>
+  </div><footer className="border-t border-white/8 px-6 py-6 text-center text-zinc-600 text-xs">© 2025 Empatixtech. <Link href="/" className="hover:text-zinc-400 ml-1">← Back to UTH</Link></footer></div>);
 }
