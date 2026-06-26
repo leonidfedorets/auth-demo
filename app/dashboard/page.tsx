@@ -118,8 +118,10 @@ export default function DashboardPage() {
   );
 
   const planBadgeClass = "bg-indigo-500/15 text-indigo-300 border-indigo-500/30";
-  const tenantName = user?.email?.split("@")[0] ?? "Tenant";
-  const tenantId = claims?.tid ?? claims?.sub?.slice(0, 8) ?? "—";
+  const tenantName = user?.displayName ?? user?.email?.split("@")[0] ?? "Tenant";
+  // tid from stats (most accurate — server-normalized) or from JWT claims
+  const tenantId = stats?.tid ?? claims?.tid ?? "—";
+  const tenantIdDisplay = (!tenantId || tenantId === "default") ? (claims?.sub ?? "—") : tenantId;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -138,7 +140,7 @@ export default function DashboardPage() {
               <Badge className={`text-[10px] border ${planBadgeClass}`}>Starter Plan</Badge>
               <Badge className="text-[10px] bg-green-500/10 text-green-400 border-green-500/30">Active</Badge>
             </div>
-            <p className="text-zinc-500 text-xs font-mono truncate">Tenant ID: {tenantId}</p>
+            <p className="text-zinc-500 text-xs font-mono truncate">Tenant ID: {tenantIdDisplay}</p>
             <p className="text-zinc-500 text-xs mt-0.5">{user?.email}</p>
           </div>
           <div className="text-right shrink-0">

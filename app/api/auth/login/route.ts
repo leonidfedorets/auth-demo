@@ -7,9 +7,8 @@ import { evaluateRisk } from "@/lib/risk";
 
 // Ensure tenant_id column exists — safe to run repeatedly
 async function ensureSchema() {
-  try {
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id UUID`;
-  } catch { /* column already exists or table doesn't exist yet */ }
+  try { await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id UUID`; } catch { /* ok */ }
+  try { await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS app_id UUID`; } catch { /* ok */ }
 }
 
 export async function POST(req: NextRequest) {
@@ -96,7 +95,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Issue full tokens
-  const tid = user.tenant_id || "c7ed9c17-0633-49df-9bc7-81de55f69fb7";
+  // Tenant accounts: tenant_id = their own user.id (self-referential ownership)
+  // End users: tenant_id = the tenant who owns them
+  // Fallback for existing demo account: use the known DEMO_TID
+  const tid = user.tenant_id || user.id || "c7ed9c17-0633-49df-9bc7-81de55f69fb7";
   const claims = { sub: user.id, email: user.email, tid, sid: sessionId, amr, acr, risk: risk.score, risk_lvl: risk.level, fid: familyId, roles: ["user"] };
   const accessToken = await signAccessToken(claims);
   const refreshToken = await signRefreshToken(claims);

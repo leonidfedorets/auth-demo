@@ -16,10 +16,20 @@ export async function POST(req: NextRequest) {
   const results: string[] = [];
 
   try {
-    // Ensure tenant_id column on users
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id UUID`;
     results.push("users.tenant_id: ok");
   } catch (e) { results.push(`users.tenant_id: ${e}`); }
+
+  try {
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS app_id UUID`;
+    results.push("users.app_id: ok");
+  } catch (e) { results.push(`users.app_id: ${e}`); }
+
+  // Backfill: tenant account's own tenant_id should equal their own id
+  try {
+    await sql`UPDATE users SET tenant_id = id WHERE tenant_id IS NULL AND app_id IS NULL`;
+    results.push("backfill tenant_id: ok");
+  } catch (e) { results.push(`backfill tenant_id: ${e}`); }
 
   try {
     // Ensure applications table
