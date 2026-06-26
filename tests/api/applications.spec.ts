@@ -24,9 +24,15 @@ test.describe("Applications CRUD API", () => {
     authCookie = await getCookieHeader(request);
   });
 
-  test.beforeEach(() => {
+  test.beforeEach(async ({}, testInfo) => {
     if (!IS_PROD) {
       test.skip(true, "API tests require prod — run: npm run test:api");
+      return;
+    }
+    // Tests that need auth are skipped when SCA blocked the session cookie
+    const needsAuth = !testInfo.title.includes("no auth") && !testInfo.title.includes("without auth");
+    if (needsAuth && !authCookie) {
+      test.skip(true, "SCA step-up blocked session — no access_token cookie obtained");
     }
   });
 
@@ -35,12 +41,19 @@ test.describe("Applications CRUD API", () => {
     expect(r.status()).toBe(401);
   });
 
-  test("POST /api/admin/applications - empty name → 400", async ({ request }) => {
+  test("POST /api/admin/applications - empty name with auth → 400", async ({ request }) => {
     const r = await request.post(`${BASE}/api/admin/applications`, {
       headers: { Cookie: authCookie, "Content-Type": "application/json" },
       data: { name: "" },
     });
     expect(r.status()).toBe(400);
+  });
+
+  test("POST /api/admin/applications - empty name without auth → 401", async ({ request }) => {
+    const r = await request.post(`${BASE}/api/admin/applications`, {
+      data: { name: "" },
+    });
+    expect(r.status()).toBe(401);
   });
 
   test("POST /api/admin/applications - name > 100 chars → 400", async ({ request }) => {
