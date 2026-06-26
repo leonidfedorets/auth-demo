@@ -8,10 +8,12 @@ export async function POST(req: NextRequest) {
   if (token) {
     claims = await verifyToken(token) as Record<string, unknown> | null;
   }
+  let apiAppId: string | undefined;
   if (!claims) {
     const apiAuth = await verifyApiKey(req as unknown as Request);
     if (apiAuth) {
       claims = { sub: apiAuth.email, tid: apiAuth.tid, sid: null };
+      apiAppId = apiAuth.appId;
     }
   }
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -90,5 +92,6 @@ export async function POST(req: NextRequest) {
     userId: userId || claims.sub,
     sessionId: sessionId || claims.sid,
     tenantId: claims.tid || "default",
+    ...(apiAppId ? { appId: apiAppId } : {}),
   });
 }

@@ -11,6 +11,7 @@ const PROTECTED_ROUTES = [
   { method: "GET",  path: "/api/admin/risk-rules" },
   { method: "GET",  path: "/api/admin/api-key" },
   { method: "GET",  path: "/api/admin/users" },
+  { method: "GET",  path: "/api/admin/applications" },
 ];
 
 test.describe("Tenant Isolation — no credentials → 401", () => {

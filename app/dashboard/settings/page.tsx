@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Settings, Save, Clock, Shield, Smartphone, Activity, Key, RefreshCw, Eye, EyeOff, Copy, KeyRound } from "lucide-react";
+import { Settings, Save, Clock, Shield, Smartphone, Activity, Key, RefreshCw, Eye, EyeOff, Copy, KeyRound, LayoutGrid, Plus, Trash2, Edit2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +31,17 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<"jwt"|"device"|"attestation"|"risk"|"apikeys">("jwt");
+  const [tab, setTab] = useState<"jwt"|"device"|"attestation"|"risk"|"apikeys"|"apps">("jwt");
+  const [apps, setApps] = useState<any[]>([]);
+  const [appsLoading, setAppsLoading] = useState(false);
+  const [newAppForm, setNewAppForm] = useState(false);
+  const [newAppName, setNewAppName] = useState("");
+  const [newAppDesc, setNewAppDesc] = useState("");
+  const [newAppSaving, setNewAppSaving] = useState(false);
+  const [appNewKeys, setAppNewKeys] = useState<Record<string, string>>({});
+  const [editingApp, setEditingApp] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
   const [apiKeyData, setApiKeyData] = useState<{keyPrefix:string;keySuffix:string;keyMasked:string;createdAt:string;tid:string}|null>(null);
   const [apiKeyRevealed, setApiKeyRevealed] = useState(false);
   const [fullApiKey, setFullApiKey] = useState<string|null>(null);
@@ -107,7 +117,94 @@ export default function SettingsPage() {
     toast.success("Copied to clipboard");
   }
 
-  const TABS = [{ id:"jwt",label:"JWT & Session",icon:Key },{ id:"device",label:"Device Binding",icon:Smartphone },{ id:"attestation",label:"Attestation Signals",icon:Shield },{ id:"risk",label:"Risk Signals",icon:Activity },{ id:"apikeys",label:"API Keys",icon:KeyRound }];
+  async function loadApps() {
+    setAppsLoading(true);
+    const r = await fetch("/api/admin/applications");
+    const d = await r.json();
+    if (!d.error) setApps(d.applications || []);
+    setAppsLoading(false);
+  }
+
+  async function createApp() {
+    if (!newAppName.trim()) return;
+    setNewAppSaving(true);
+    const r = await fetch("/api/admin/applications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newAppName.trim(), description: newAppDesc.trim() }),
+    });
+    const d = await r.json();
+    if (d.application) {
+      if (d.key) setAppNewKeys(k => ({ ...k, [d.application.id]: d.key }));
+      setApps(a => [d.application, ...a]);
+      setNewAppForm(false);
+      setNewAppName("");
+      setNewAppDesc("");
+      toast.success("Application created");
+    } else {
+      toast.error(d.error || "Failed to create application");
+    }
+    setNewAppSaving(false);
+  }
+
+  async function deleteApp(id: string) {
+    const r = await fetch(`/api/admin/applications/${id}`, { method: "DELETE" });
+    const d = await r.json();
+    if (d.success) {
+      setApps(a => a.filter(x => x.id !== id));
+      toast.success("Application deleted");
+    } else {
+      toast.error("Failed to delete");
+    }
+  }
+
+  async function saveEditApp(id: string) {
+    const r = await fetch(`/api/admin/applications/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName, description: editDesc }),
+    });
+    const d = await r.json();
+    if (d.application) {
+      setApps(a => a.map(x => x.id === id ? d.application : x));
+      setEditingApp(null);
+      toast.success("Updated");
+    } else {
+      toast.error(d.error || "Failed to update");
+    }
+  }
+
+  async function regenerateAppKey(id: string, appName: string) {
+    const r = await fetch(`/api/admin/applications/${id}/keys`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "regenerate" }),
+    });
+    const d = await r.json();
+    if (d.key) {
+      setAppNewKeys(k => ({ ...k, [id]: d.key }));
+      toast.success(`Key regenerated for ${appName} — copy it now`);
+    } else {
+      toast.error("Failed to regenerate");
+    }
+  }
+
+  async function revokeAppKey(id: string) {
+    const r = await fetch(`/api/admin/applications/${id}/keys`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "revoke" }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      setAppNewKeys(k => { const n = { ...k }; delete n[id]; return n; });
+      toast.success("Key revoked");
+    } else {
+      toast.error("Failed to revoke");
+    }
+  }
+
+  const TABS = [{ id:"jwt",label:"JWT & Session",icon:Key },{ id:"device",label:"Device Binding",icon:Smartphone },{ id:"attestation",label:"Attestation Signals",icon:Shield },{ id:"risk",label:"Risk Signals",icon:Activity },{ id:"apikeys",label:"API Keys",icon:KeyRound },{ id:"apps",label:"Applications",icon:LayoutGrid }];
 
   return (<div className="min-h-screen bg-zinc-950 text-white"><DashNav user={user}/>
     <div className="max-w-4xl mx-auto px-6 py-10">
@@ -116,7 +213,7 @@ export default function SettingsPage() {
         <div className="flex gap-2"><Button onClick={()=>{setLoading(true);fetch("/api/admin/settings").then(r=>r.json()).then(d=>{setSettings(d.settings);setLoading(false);});}} variant="outline" className="border-zinc-700 text-zinc-400 hover:text-white h-9"><RefreshCw className="w-4 h-4"/></Button><Button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-9"><Save className="w-4 h-4 mr-1.5"/>{saving?"Saving…":"Save"}</Button></div>
       </div>
 
-      <div className="flex gap-1 mb-6 border-b border-zinc-800">{TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id as any)} className={`flex items-center gap-1.5 px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px ${tab===t.id?"border-indigo-500 text-white":"border-transparent text-zinc-500 hover:text-zinc-300"}`}><t.icon className="w-3.5 h-3.5"/>{t.label}</button>))}</div>
+      <div className="flex gap-1 mb-6 border-b border-zinc-800">{TABS.map(t=>(<button key={t.id} onClick={()=>{ setTab(t.id as any); if(t.id==="apps") loadApps(); }} className={`flex items-center gap-1.5 px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px ${tab===t.id?"border-indigo-500 text-white":"border-transparent text-zinc-500 hover:text-zinc-300"}`}><t.icon className="w-3.5 h-3.5"/>{t.label}</button>))}</div>
 
       {tab==="jwt" && (<div className="space-y-6">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 space-y-4">
@@ -240,6 +337,66 @@ result = client.auth.login(
     password=password
 )`}</pre>)}
         </div>
+      </div>)}
+
+      {tab==="apps" && (<div className="space-y-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-white font-semibold">Applications</h3>
+          <Button onClick={()=>setNewAppForm(f=>!f)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3"><Plus className="w-3.5 h-3.5 mr-1"/>New Application</Button>
+        </div>
+
+        {newAppForm && (<div className="rounded-xl border border-indigo-700 bg-zinc-900 p-4 space-y-3">
+          <h4 className="text-white text-sm font-semibold">New Application</h4>
+          <div><Label className="text-zinc-400 text-xs mb-1 block">Name *</Label><Input value={newAppName} onChange={e=>setNewAppName(e.target.value)} placeholder="My App" className="bg-zinc-800 border-zinc-700 text-white" maxLength={100}/></div>
+          <div><Label className="text-zinc-400 text-xs mb-1 block">Description</Label><Input value={newAppDesc} onChange={e=>setNewAppDesc(e.target.value)} placeholder="Optional description" className="bg-zinc-800 border-zinc-700 text-white"/></div>
+          <div className="flex gap-2 pt-1">
+            <Button onClick={createApp} disabled={newAppSaving||!newAppName.trim()} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs">{newAppSaving?"Creating…":"Create"}</Button>
+            <Button onClick={()=>{setNewAppForm(false);setNewAppName("");setNewAppDesc("");}} variant="outline" className="border-zinc-700 text-zinc-400 hover:text-white h-8 text-xs">Cancel</Button>
+          </div>
+        </div>)}
+
+        {appsLoading && <p className="text-zinc-500 text-sm">Loading…</p>}
+        {!appsLoading && apps.length === 0 && <p className="text-zinc-500 text-sm">No applications yet. Create one above.</p>}
+
+        {apps.map(app=>(<div key={app.id} className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              {editingApp===app.id ? (<div className="space-y-2">
+                <Input value={editName} onChange={e=>setEditName(e.target.value)} className="bg-zinc-800 border-zinc-700 text-white text-sm" maxLength={100}/>
+                <Input value={editDesc} onChange={e=>setEditDesc(e.target.value)} placeholder="Description" className="bg-zinc-800 border-zinc-700 text-white text-sm"/>
+                <div className="flex gap-1">
+                  <button onClick={()=>saveEditApp(app.id)} className="p-1 rounded text-green-400 hover:bg-zinc-700"><Check className="w-4 h-4"/></button>
+                  <button onClick={()=>setEditingApp(null)} className="p-1 rounded text-zinc-500 hover:bg-zinc-700"><X className="w-4 h-4"/></button>
+                </div>
+              </div>) : (<>
+                <div className="flex items-center gap-2">
+                  <p className="text-white font-semibold text-sm truncate">{app.name}</p>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${app.is_active?"bg-green-900 text-green-300":"bg-zinc-700 text-zinc-400"}`}>{app.is_active?"active":"inactive"}</span>
+                </div>
+                {app.description && <p className="text-zinc-500 text-xs mt-0.5 truncate">{app.description}</p>}
+                <p className="text-zinc-600 text-[10px] mt-1">{new Date(app.created_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}</p>
+              </>)}
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {editingApp!==app.id && (<button onClick={()=>{setEditingApp(app.id);setEditName(app.name);setEditDesc(app.description||"");}} className="p-1.5 rounded text-zinc-500 hover:text-white hover:bg-zinc-700" title="Edit"><Edit2 className="w-3.5 h-3.5"/></button>)}
+              <button onClick={()=>deleteApp(app.id)} className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-700" title="Delete"><Trash2 className="w-3.5 h-3.5"/></button>
+            </div>
+          </div>
+
+          {/* API Key section */}
+          <div className="border-t border-zinc-800 pt-3 space-y-2">
+            <p className="text-zinc-500 text-xs font-medium">API Key</p>
+            {appNewKeys[app.id] && (<div className="bg-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2">
+              <code className="flex-1 text-xs font-mono text-green-300 truncate">{appNewKeys[app.id]}</code>
+              <button onClick={()=>{navigator.clipboard.writeText(appNewKeys[app.id]);toast.success("Copied");}} className="text-zinc-400 hover:text-white"><Copy className="w-3.5 h-3.5"/></button>
+            </div>)}
+            {!appNewKeys[app.id] && <p className="text-zinc-600 text-xs font-mono">uth_live_••••••••...••••</p>}
+            <div className="flex gap-2">
+              <button onClick={()=>regenerateAppKey(app.id,app.name)} className="text-xs px-2.5 py-1 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-700 flex items-center gap-1"><RefreshCw className="w-3 h-3"/>Regenerate</button>
+              <button onClick={()=>revokeAppKey(app.id)} className="text-xs px-2.5 py-1 rounded-md bg-zinc-800 border border-red-900 text-red-400 hover:bg-red-900/20 hover:text-red-300 flex items-center gap-1"><X className="w-3 h-3"/>Revoke</button>
+            </div>
+          </div>
+        </div>))}
       </div>)}
 
       {/* Revoke confirmation modal */}

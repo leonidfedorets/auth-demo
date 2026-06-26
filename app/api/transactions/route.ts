@@ -5,14 +5,14 @@ import { redis } from "@/lib/redis";
 
 const DEMO_TID = "c7ed9c17-0633-49df-9bc7-81de55f69fb7";
 
-async function authenticate(req: NextRequest): Promise<{ tid: string; sub?: string } | null> {
+async function authenticate(req: NextRequest): Promise<{ tid: string; sub?: string; appId?: string } | null> {
   const token = req.cookies.get("access_token")?.value;
   if (token) {
     const claims = await verifyToken(token);
     if (claims) return { tid: (claims.tid as string) || DEMO_TID, sub: claims.sub as string };
   }
   const apiAuth = await verifyApiKey(req as unknown as Request);
-  if (apiAuth) return { tid: apiAuth.tid };
+  if (apiAuth) return { tid: apiAuth.tid, appId: apiAuth.appId };
   return null;
 }
 
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
 
   const id = `txn-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   const ts = Date.now();
-  const record = { id, tid: auth.tid, type, userId, deviceId, ip, metadata, ts, status: "recorded" };
+  const record = { id, tid: auth.tid, type, userId, deviceId, ip, metadata, ts, status: "recorded", ...(auth.appId ? { appId: auth.appId } : {}) };
 
   await redis.lpush(`tenant:transactions:${auth.tid}`, JSON.stringify(record));
 
