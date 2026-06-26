@@ -64,6 +64,24 @@ export async function POST(req: NextRequest) {
     results.push("sca_challenges: ok");
   } catch (e) { results.push(`sca_challenges: ${e}`); }
 
+  // Fix wrongly-created users: if someone called /api/auth/register without an API key
+  // but SHOULD have been an end user under a tenant, the body can include:
+  // { fixUsers: [{ email, tenantId, appId? }] }
+  let body: { fixUsers?: { email: string; tenantId: string; appId?: string }[] } = {};
+  try { body = await (req as NextRequest).json(); } catch { /* no body */ }
+  if (body.fixUsers && Array.isArray(body.fixUsers)) {
+    for (const { email, tenantId, appId } of body.fixUsers) {
+      try {
+        await sql`
+          UPDATE users
+          SET tenant_id = ${tenantId}, app_id = ${appId ?? null}
+          WHERE email = ${email}
+        `;
+        results.push(`fix user ${email} → tenant ${tenantId}: ok`);
+      } catch (e) { results.push(`fix user ${email}: ${e}`); }
+    }
+  }
+
   return NextResponse.json({ success: true, results });
 }
 
