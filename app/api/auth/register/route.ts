@@ -83,7 +83,25 @@ export async function POST(req: NextRequest) {
               ${JSON.stringify({ appId: apiAuth.appId, via: "api_key" })})
     `.catch(() => {});
 
+    // Issue a JWT token for the newly registered client
+    const sessionId = generateId();
+    const tokenClaims = {
+      sub: user.id,
+      email: user.email,
+      tid: apiAuth.tid,
+      sid: sessionId,
+      amr: ["pwd"],
+      acr: "bronze",
+      risk: risk.score,
+      risk_lvl: risk.level,
+      roles: ["client"],
+    };
+    const token = await signAccessToken(tokenClaims);
+
     return NextResponse.json({
+      userId: user.id,
+      clientId: user.id,
+      token,
       user: {
         id: user.id,
         email: user.email,

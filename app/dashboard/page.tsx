@@ -14,7 +14,7 @@ function DashNav({ user, currentPath }: { user: any; currentPath: string }) {
   const NAV_ITEMS = [
     { href: "/dashboard", label: "Overview" },
     { href: "/dashboard/transactions", label: "Transactions" },
-    { href: "/dashboard/users", label: "Users" },
+    { href: "/dashboard/clients", label: "Clients" },
     { href: "/dashboard/devices", label: "Devices" },
     { href: "/dashboard/sessions", label: "Sessions" },
     { href: "/dashboard/audit", label: "Audit Log" },
@@ -80,15 +80,7 @@ const PLATFORM_FEATURES = [
   { icon: Cpu, title: "Engine Risk", desc: "Behavioral risk signals — velocity, geo anomaly, device reputation.", href: "/platform/engine-risk", color: "text-orange-400", badge: "ML" },
 ];
 
-const QUICK_LINKS = [
-  { icon: BarChart2, label: "Transactions", count: "1,247", href: "/dashboard/transactions" },
-  { icon: Users, label: "Users", count: "89", href: "/dashboard/users" },
-  { icon: Monitor, label: "Devices", count: "143", href: "/dashboard/devices" },
-  { icon: Globe, label: "Sessions", count: "34", href: "/dashboard/sessions" },
-  { icon: FileText, label: "Audit Log", count: "15 today", href: "/dashboard/audit" },
-  { icon: AlertTriangle, label: "Risk Rules", count: "12 active", href: "/dashboard/risk-rules" },
-  { icon: Zap, label: "Settings", count: "Configure", href: "/dashboard/settings" },
-];
+// Quick links counts are populated from stats
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -199,7 +191,15 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-sm font-bold text-white mb-3">Quick Links</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-            {QUICK_LINKS.map(q => (
+            {[
+              { icon: BarChart2, label: "Transactions", count: stats?.totalTransactions != null ? stats.totalTransactions.toLocaleString() : "—", href: "/dashboard/transactions" },
+              { icon: Users, label: "Clients", count: stats?.totalUsers != null ? stats.totalUsers.toLocaleString() : "—", href: "/dashboard/clients" },
+              { icon: Monitor, label: "Devices", count: stats?.boundDevices != null ? stats.boundDevices.toLocaleString() : "—", href: "/dashboard/devices" },
+              { icon: Globe, label: "Sessions", count: stats?.activeSessions != null ? stats.activeSessions.toLocaleString() : "—", href: "/dashboard/sessions" },
+              { icon: FileText, label: "Audit Log", count: stats ? `${stats.auditToday ?? 0} today` : "—", href: "/dashboard/audit" },
+              { icon: AlertTriangle, label: "Risk Rules", count: "12 active", href: "/dashboard/risk-rules" },
+              { icon: Zap, label: "Settings", count: "Configure", href: "/dashboard/settings" },
+            ].map(q => (
               <Link key={q.label} href={q.href} className="rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-700 hover:bg-zinc-800/60 transition-all cursor-pointer p-3 flex flex-col items-center text-center gap-1.5">
                 <q.icon className="w-4 h-4 text-indigo-400" />
                 <p className="text-white text-xs font-medium">{q.label}</p>

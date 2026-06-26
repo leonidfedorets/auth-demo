@@ -1,0 +1,92 @@
+"use client";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Users, Search, ShieldCheck, ShieldOff, Clock, Activity } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+
+function DashNav({ user }: { user: any }) {
+  return (<nav className="border-b border-zinc-800 px-6 py-3 flex items-center gap-4 bg-zinc-950 sticky top-0 z-40">
+    <Link href="/" className="flex items-center gap-2"><div className="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center"><span className="font-black text-white text-[10px]">UTH</span></div><span className="font-black text-sm tracking-tighter"><span className="text-indigo-400">U</span><span className="text-indigo-300">T</span><span className="text-indigo-200">H</span></span></Link>
+    <span className="text-zinc-600">/</span><Link href="/dashboard" className="text-zinc-500 hover:text-white text-sm">Dashboard</Link>
+    <span className="text-zinc-600">/</span><span className="text-zinc-400 text-sm">Clients</span>
+    <div className="ml-auto text-xs text-zinc-500">{user?.email}</div>
+  </nav>);
+}
+
+const RISK_COLORS: Record<string,string> = { low:"text-green-400",medium:"text-yellow-400",high:"text-orange-400",critical:"text-red-400" };
+
+export default function ClientsPage() {
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
+  const [clients, setClients] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<any>(null);
+
+  useEffect(()=>{
+    fetch("/api/auth/me").then(async r=>{ if(r.status===401){router.push("/login");return;} const d=await r.json(); setUser(d.user); });
+    fetch("/api/admin/users").then(r=>r.json()).then(d=>{ setClients(d.users||[]); setLoading(false); });
+  },[]);
+
+  async function handleSearch(q: string) {
+    setSearch(q);
+    const r = await fetch(`/api/admin/users${q?`?search=${encodeURIComponent(q)}`:""}`);
+    const data = await r.json();
+    setClients(data.users||[]);
+  }
+
+  function timeAgo(ts: string) {
+    if (!ts) return "never";
+    const s = Math.floor((Date.now()-new Date(ts).getTime())/1000);
+    if (s<60) return `${s}s ago`;
+    if (s<3600) return `${Math.floor(s/60)}m ago`;
+    if (s<86400) return `${Math.floor(s/3600)}h ago`;
+    return `${Math.floor(s/86400)}d ago`;
+  }
+
+  return (<div className="min-h-screen bg-zinc-950 text-white"><DashNav user={user}/>
+    <div className="flex h-[calc(100vh-49px)]">
+      <div className={`flex-1 flex flex-col overflow-hidden ${selected?"lg:max-w-[60%]":""}`}>
+        <div className="px-6 py-4 border-b border-zinc-800 flex items-center gap-3">
+          <h1 className="text-lg font-black text-white flex items-center gap-2"><Users className="w-4 h-4 text-indigo-400"/>Tenant Clients</h1>
+          <Badge variant="outline" className="border-zinc-700 text-zinc-400 text-xs">{clients.length} clients</Badge>
+          <div className="ml-auto relative"><Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2"/><Input placeholder="Search email…" value={search} onChange={e=>handleSearch(e.target.value)} className="bg-zinc-900 border-zinc-700 text-white text-xs h-7 pl-7 w-48"/></div>
+        </div>
+        <div className="flex-1 overflow-auto">
+          {loading ? <div className="text-zinc-500 text-sm p-8">Loading…</div> : (
+          clients.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full py-20 text-center">
+              <Users className="w-10 h-10 text-zinc-700 mb-3"/>
+              <p className="text-zinc-400 font-medium text-sm">No clients yet</p>
+              <p className="text-zinc-600 text-xs mt-1 max-w-xs">Use your application API key to call <code className="font-mono bg-zinc-800 px-1 rounded">POST /api/auth/register</code> to register clients in your application.</p>
+            </div>
+          ) : (
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-zinc-950 border-b border-zinc-800"><tr>{["Client","Application","Client ID","MFA","Sessions","Last active",""].map(h=>(<th key={h} className="text-left px-4 py-2.5 text-zinc-500 font-medium">{h}</th>))}</tr></thead>
+            <tbody>{clients.map(c=>(<tr key={c.id} onClick={()=>setSelected(c)} className={`border-b border-zinc-800/40 hover:bg-zinc-900 cursor-pointer ${selected?.id===c.id?"bg-zinc-900":""}`}>
+              <td className="px-4 py-3"><div className="text-white font-medium">{c.display_name||c.email}</div><div className="text-zinc-500 font-mono text-[10px]">{c.email}</div></td>
+              <td className="px-4 py-3"><span className="text-indigo-300 text-[11px] font-medium">{c.app_name||<span className="text-zinc-600">—</span>}</span></td>
+              <td className="px-4 py-3 font-mono text-zinc-500 text-[10px]">{c.id.slice(0,8)}…</td>
+              <td className="px-4 py-3">{c.mfa_enabled?<ShieldCheck className="w-4 h-4 text-green-400"/>:<ShieldOff className="w-4 h-4 text-zinc-600"/>}</td>
+              <td className="px-4 py-3 text-zinc-400">{c.active_sessions??0} <span className="text-zinc-600">/ {c.total_sessions??0}</span></td>
+              <td className="px-4 py-3 text-zinc-500 flex items-center gap-1"><Clock className="w-3 h-3"/>{timeAgo(c.last_login_at||c.last_session_at)}</td>
+              <td className="px-4 py-3 text-zinc-600">›</td>
+            </tr>))}</tbody>
+          </table>))}
+        </div>
+      </div>
+      {selected && (<div className="w-full lg:w-[40%] border-l border-zinc-800 bg-zinc-950 overflow-auto flex-shrink-0">
+        <div className="sticky top-0 bg-zinc-950 border-b border-zinc-800 px-5 py-3 flex justify-between items-center"><h2 className="text-white font-semibold text-sm">Client Detail</h2><button onClick={()=>setSelected(null)} className="text-zinc-500 hover:text-white text-xs cursor-pointer">✕</button></div>
+        <div className="p-5 space-y-4">
+          <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold">{(selected.display_name||selected.email||"?")[0].toUpperCase()}</div><div><p className="text-white font-semibold">{selected.display_name||"—"}</p><p className="text-zinc-400 text-xs">{selected.email}</p></div></div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 divide-y divide-zinc-800/50">
+            {([["Client ID",selected.id,true],["Application",selected.app_name||"—"],["App ID",selected.app_id||"—",true],["Created",new Date(selected.created_at).toLocaleDateString()],["Last seen",(selected.last_login_at||selected.last_session_at)?new Date(selected.last_login_at||selected.last_session_at).toLocaleString():"never"],["MFA Enabled",selected.mfa_enabled?"Yes":"No"],["Active sessions",String(selected.active_sessions??0)],["Total sessions",String(selected.total_sessions??0)]] as [string,string,boolean?][]).map(([l,v,m])=>(<div key={l} className="flex items-center justify-between px-3 py-1.5 gap-2"><span className="text-zinc-500 text-xs">{l}</span><span className={`text-xs text-right truncate max-w-[60%] ${m?"font-mono text-indigo-300":"text-zinc-300"}`}>{v}</span></div>))}
+          </div>
+          <Link href={`/dashboard/transactions?userId=${selected.id}`} className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 text-sm border border-indigo-500/30 rounded-lg px-3 py-2 hover:bg-indigo-500/5"><Activity className="w-4 h-4"/>View transactions for this client</Link>
+        </div>
+      </div>)}
+    </div>
+  </div>);
+}
