@@ -87,13 +87,13 @@ export default function TransactionsPage() {
               <tr>{["Time","Type","Subtype","User","IP","Risk","Decision",""].map(h=>(<th key={h} className="text-left px-3 py-2 text-zinc-500 font-medium whitespace-nowrap">{h}</th>))}</tr>
             </thead>
             <tbody>{filtered.map(tx=>(<tr key={tx.id} onClick={()=>setSelected(tx)} className={`border-b border-zinc-800/30 hover:bg-zinc-900/70 cursor-pointer transition-colors ${selected?.id===tx.id?"bg-zinc-900":""}`}>
-              <td className="px-3 py-2 text-zinc-600 font-mono whitespace-nowrap">{timeStr(tx.created_at)}</td>
+              <td className="px-3 py-2 text-zinc-600 font-mono whitespace-nowrap">{timeStr(tx.created_at||tx.createdAt||(tx.ts?new Date(tx.ts as number).toISOString():null))}</td>
               <td className="px-3 py-2"><Badge className={`${TYPE_COLORS[tx.type]||"bg-zinc-800 text-zinc-400"} border text-[10px] py-0 whitespace-nowrap`}>{tx.type}</Badge></td>
               <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{SUBTYPE_LABELS[tx.subtype||""]||tx.subtype||"—"}</td>
-              <td className="px-3 py-2 text-zinc-300 whitespace-nowrap max-w-[120px] truncate">{tx.email||"—"}</td>
+              <td className="px-3 py-2 text-zinc-300 whitespace-nowrap max-w-[120px] truncate">{tx.email||tx.userId||"—"}</td>
               <td className="px-3 py-2 font-mono text-zinc-500 whitespace-nowrap">{tx.ip||"—"}{tx.country&&<span className="ml-1 text-zinc-700">{tx.country}</span>}</td>
-              <td className="px-3 py-2 whitespace-nowrap"><span className={`font-mono font-bold ${RISK_COLORS[tx.risk_level]||"text-zinc-500"}`}>{tx.risk_score??""}</span>{tx.risk_level&&<span className="text-zinc-600 ml-1 capitalize">{tx.risk_level}</span>}</td>
-              <td className="px-3 py-2"><div className="flex items-center gap-1">{DECISION_ICON[tx.decision||""]}<span className={`${tx.decision==="ALLOW"?"text-green-400":tx.decision==="DENY"?"text-red-400":tx.decision==="STEP_UP"?"text-yellow-400":"text-zinc-500"}`}>{tx.decision||"—"}</span></div></td>
+              <td className="px-3 py-2 whitespace-nowrap"><span className={`font-mono font-bold ${RISK_COLORS[(tx.risk as any)?.level||tx.risk_level]||"text-zinc-500"}`}>{(tx.risk as any)?.score??tx.risk_score??""}</span>{((tx.risk as any)?.level||tx.risk_level)&&<span className="text-zinc-600 ml-1 capitalize">{(tx.risk as any)?.level||tx.risk_level}</span>}</td>
+              <td className="px-3 py-2"><div className="flex items-center gap-1">{DECISION_ICON[(tx.decision||(tx.risk as any)?.decision)||""]}<span className={`${(tx.decision||(tx.risk as any)?.decision)==="ALLOW"?"text-green-400":(tx.decision||(tx.risk as any)?.decision)==="DENY"?"text-red-400":(tx.decision||(tx.risk as any)?.decision)==="STEP_UP"?"text-yellow-400":"text-zinc-500"}`}>{tx.decision||(tx.risk as any)?.decision||"—"}</span></div></td>
               <td className="px-3 py-2 text-zinc-700"><ChevronRight className="w-3 h-3"/></td>
             </tr>))}</tbody>
           </table>)}

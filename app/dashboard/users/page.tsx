@@ -61,8 +61,8 @@ export default function UsersPage() {
             <tbody>{users.map(u=>(<tr key={u.id} onClick={()=>setSelected(u)} className={`border-b border-zinc-800/40 hover:bg-zinc-900 cursor-pointer ${selected?.id===u.id?"bg-zinc-900":""}`}>
               <td className="px-4 py-3"><div className="text-white font-medium">{u.display_name||u.email}</div><div className="text-zinc-500 font-mono text-[10px]">{u.email}</div></td>
               <td className="px-4 py-3">{u.mfa_enabled||u.totp_enabled?<ShieldCheck className="w-4 h-4 text-green-400"/>:<ShieldOff className="w-4 h-4 text-zinc-600"/>}</td>
-              <td className="px-4 py-3 text-zinc-400">{u.total_sessions??0}</td>
-              <td className="px-4 py-3 text-zinc-500 flex items-center gap-1"><Clock className="w-3 h-3"/>{timeAgo(u.last_seen)}</td>
+              <td className="px-4 py-3 text-zinc-400">{u.active_sessions??u.total_sessions??0}</td>
+              <td className="px-4 py-3 text-zinc-500 flex items-center gap-1"><Clock className="w-3 h-3"/>{timeAgo(u.last_login_at||u.last_session_at||u.last_seen)}</td>
               <td className="px-4 py-3"><span className={`font-medium capitalize ${RISK_COLORS[u.last_risk]||"text-zinc-400"}`}>{u.last_risk||"—"}</span></td>
               <td className="px-4 py-3 text-zinc-600">›</td>
             </tr>))}</tbody>
@@ -74,7 +74,7 @@ export default function UsersPage() {
         <div className="p-5 space-y-4">
           <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold">{(selected.display_name||selected.email||"?")[0].toUpperCase()}</div><div><p className="text-white font-semibold">{selected.display_name||"—"}</p><p className="text-zinc-400 text-xs">{selected.email}</p></div></div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 divide-y divide-zinc-800/50">
-            {[["User ID",selected.id,true],["Tenant",selected.tenant_id||"default",true],["Created",new Date(selected.created_at).toLocaleDateString()],["Last seen",selected.last_seen?new Date(selected.last_seen).toLocaleString():"never"],["MFA Enabled",selected.mfa_enabled||selected.totp_enabled?"Yes":"No"],["TOTP",selected.totp_enabled?"Enrolled":"Not enrolled"],["Sessions",String(selected.total_sessions??0)],["Last risk",selected.last_risk||"—"]].map(([l,v,m])=>(<div key={String(l)} className="flex items-center justify-between px-3 py-1.5 gap-2"><span className="text-zinc-500 text-xs">{l}</span><span className={`text-xs text-right truncate ${m?"font-mono text-indigo-300":"text-zinc-300"}`}>{String(v)}</span></div>))}
+            {[["User ID",selected.id,true],["Tenant",selected.tenant_id||"default",true],["Created",new Date(selected.created_at).toLocaleDateString()],["Last seen",(selected.last_login_at||selected.last_session_at||selected.last_seen)?new Date(selected.last_login_at||selected.last_session_at||selected.last_seen).toLocaleString():"never"],["MFA Enabled",selected.mfa_enabled||selected.totp_enabled?"Yes":"No"],["TOTP",selected.totp_enabled?"Enrolled":"Not enrolled"],["Sessions",String(selected.total_sessions??0)],["Last risk",selected.last_risk||"—"]].map(([l,v,m])=>(<div key={String(l)} className="flex items-center justify-between px-3 py-1.5 gap-2"><span className="text-zinc-500 text-xs">{l}</span><span className={`text-xs text-right truncate ${m?"font-mono text-indigo-300":"text-zinc-300"}`}>{String(v)}</span></div>))}
           </div>
           <Link href={`/dashboard/transactions?userId=${selected.id}`} className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 text-sm border border-indigo-500/30 rounded-lg px-3 py-2 hover:bg-indigo-500/5"><Activity className="w-4 h-4"/>View transactions for this user</Link>
         </div>

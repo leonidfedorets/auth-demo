@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@vercel/postgres";
 import { signAccessToken, signRefreshToken, signSCAChallengeToken, accessTTLSeconds, refreshTTLSeconds } from "@/lib/jwt";
 import { verifyPassword, hashToken, generateId, getClientIP } from "@/lib/auth";
-import { cacheSession, loginRateLimit, incrementFailedLogins, resetFailedLogins } from "@/lib/redis";
+import { cacheSession, loginRateLimit, incrementFailedLogins, resetFailedLogins, redis } from "@/lib/redis";
 import { evaluateRisk } from "@/lib/risk";
 
 export async function POST(req: NextRequest) {
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Credential lookup
-  const result = await sql`SELECT id, email, password_hash, display_name, mfa_enabled, totp_verified, locked, failed_attempts, last_login_ip FROM users WHERE email = ${email}`;
+  const result = await sql`SELECT id, email, password_hash, display_name, mfa_enabled, totp_verified, locked, failed_attempts, last_login_ip, tenant_id FROM users WHERE email = ${email}`;
   if (result.rows.length === 0) {
     await incrementFailedLogins(ip);
     return NextResponse.json({ error: "invalid_credentials", message: "Invalid email or password" }, { status: 401 });
@@ -88,7 +88,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Issue full tokens
-  const claims = { sub: user.id, email: user.email, tid: "default", sid: sessionId, amr, acr, risk: risk.score, risk_lvl: risk.level, fid: familyId, roles: ["user"] };
+  const tid = user.tenant_id || "c7ed9c17-0633-49df-9bc7-81de55f69fb7";
+  const claims = { sub: user.id, email: user.email, tid, sid: sessionId, amr, acr, risk: risk.score, risk_lvl: risk.level, fid: familyId, roles: ["user"] };
   const accessToken = await signAccessToken(claims);
   const refreshToken = await signRefreshToken(claims);
 
@@ -100,6 +101,30 @@ export async function POST(req: NextRequest) {
   await cacheSession(sessionId, { userId: user.id, email: user.email }, refreshTTLSeconds());
   await sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${ip} WHERE id = ${user.id}`;
   await sql`INSERT INTO audit_logs (user_id, session_id, action, ip_address, user_agent, risk_score, details) VALUES (${user.id}, ${sessionId}, 'auth.login', ${ip}, ${ua}, ${risk.score}, ${JSON.stringify({ amr })})`;
+
+  // Record transaction in Redis for the Transactions dashboard
+  const txRecord = {
+    id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tid,
+    type: "auth",
+    subtype: "login_success",
+    userId: user.email,
+    email: user.email,
+    ip,
+    userAgent: ua,
+    sessionId,
+    risk: { score: risk.score, level: risk.level, decision: risk.decision },
+    risk_score: risk.score,
+    risk_level: risk.level,
+    decision: risk.decision,
+    amr,
+    acr,
+    ts: Date.now(),
+    createdAt: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  };
+  await redis.lpush(`tenant:transactions:${tid}`, JSON.stringify(txRecord)).catch(() => {});
+  await redis.ltrim(`tenant:transactions:${tid}`, 0, 499).catch(() => {});
 
   const res = NextResponse.json({
     user: { id: user.id, email: user.email, displayName: user.display_name, mfaEnabled: user.mfa_enabled },
