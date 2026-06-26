@@ -5,8 +5,16 @@ import { verifyPassword, hashToken, generateId, getClientIP } from "@/lib/auth";
 import { cacheSession, loginRateLimit, incrementFailedLogins, resetFailedLogins, redis } from "@/lib/redis";
 import { evaluateRisk } from "@/lib/risk";
 
+// Ensure tenant_id column exists — safe to run repeatedly
+async function ensureSchema() {
+  try {
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id UUID`;
+  } catch { /* column already exists or table doesn't exist yet */ }
+}
+
 export async function POST(req: NextRequest) {
   try {
+  await ensureSchema();
   const ip = getClientIP(req);
   const ua = req.headers.get("user-agent") ?? "";
 
