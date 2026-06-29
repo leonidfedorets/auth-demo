@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   Activity, Shield, Key, Smartphone, Users, Monitor,
   ChevronRight, FileText, Globe, Lock, BarChart2, Zap,
-  AlertTriangle, Cpu
+  AlertTriangle, Cpu, Building2, Workflow
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -18,6 +18,8 @@ function DashNav({ user, currentPath }: { user: any; currentPath: string }) {
     { href: "/dashboard/devices", label: "Devices" },
     { href: "/dashboard/sessions", label: "Sessions" },
     { href: "/dashboard/audit", label: "Audit Log" },
+    { href: "/dashboard/kyb", label: "KYB" },
+    { href: "/dashboard/onboarding", label: "Onboarding" },
     { href: "/dashboard/risk-rules", label: "Risk Rules" },
     { href: "/dashboard/settings", label: "Settings" },
   ];
@@ -197,6 +199,8 @@ export default function DashboardPage() {
               { icon: Monitor, label: "Devices", count: stats?.boundDevices != null ? stats.boundDevices.toLocaleString() : "—", href: "/dashboard/devices" },
               { icon: Globe, label: "Sessions", count: stats?.activeSessions != null ? stats.activeSessions.toLocaleString() : "—", href: "/dashboard/sessions" },
               { icon: FileText, label: "Audit Log", count: stats ? `${stats.auditToday ?? 0} today` : "—", href: "/dashboard/audit" },
+              { icon: Building2, label: "KYB", count: "6 clients", href: "/dashboard/kyb" },
+              { icon: Workflow, label: "Onboarding", count: "18 steps", href: "/dashboard/onboarding" },
               { icon: AlertTriangle, label: "Risk Rules", count: "12 active", href: "/dashboard/risk-rules" },
               { icon: Zap, label: "Settings", count: "Configure", href: "/dashboard/settings" },
             ].map(q => (
