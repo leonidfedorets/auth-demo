@@ -1053,14 +1053,462 @@ function WalkthroughTab({ steps, flows, selectedFlowId, setSelectedFlowId }: { s
   return <WalkthroughRunner key={flow.id} flow={flow} flows={flows} steps={steps} setSelectedFlowId={setSelectedFlowId} />;
 }
 
+// ─── EVENT BINDINGS ───────────────────────────────────────────────────────────
+// Each screen type defines the exact data contract: what the client must send,
+// what UTH stores internally, and what is returned to the client application.
+const SCREEN_SCHEMAS: Record<string, { collects: { field: string; type: string; required: boolean; description: string }[]; stores: string[]; returns: { field: string; type: string; description: string }[] }> = {
+  invite_code: { collects: [{ field: "invitation_code", type: "string(6)", required: true, description: "6-character alphanumeric invitation code" }], stores: ["invite_validated", "referrer_id"], returns: [{ field: "referrer_id", type: "string | null", description: "User ID of the referrer if code was valid" }] },
+  mobile_otp: { collects: [{ field: "phone_number", type: "E.164 string", required: true, description: "International phone number e.g. +44771..." }, { field: "otp_code", type: "string(6)", required: true, description: "6-digit OTP received via SMS" }], stores: ["verified_phone"], returns: [{ field: "phone_verified", type: "boolean", description: "Whether phone was successfully verified" }, { field: "phone_last4", type: "string", description: "Last 4 digits of the verified number" }] },
+  us_relation: { collects: [{ field: "us_status", type: "enum: not_us | citizen | green_card | tax_resident", required: true, description: "User's US person status for FATCA compliance" }], stores: ["fatca_declaration"], returns: [{ field: "is_us_person", type: "boolean", description: "True if any US relation was declared" }, { field: "us_status", type: "string", description: "Exact declaration value stored" }] },
+  geo_select: { collects: [{ field: "country", type: "ISO 3166-1 alpha-2", required: true, description: "User's country of residence" }], stores: ["residence_country", "jurisdiction"], returns: [{ field: "country", type: "string", description: "ISO country code" }, { field: "permitted", type: "boolean", description: "Whether country is on the allowed list" }, { field: "waitlisted", type: "boolean", description: "Whether country is waitlisted" }] },
+  personal_data: { collects: [{ field: "first_name", type: "string", required: true, description: "Legal first name" }, { field: "last_name", type: "string", required: true, description: "Legal last name" }, { field: "date_of_birth", type: "ISO 8601 date", required: true, description: "Date of birth for age verification" }, { field: "nationality", type: "ISO 3166-1 alpha-2", required: true, description: "Nationality / citizenship country" }], stores: ["kyc_l1_personal"], returns: [{ field: "kyc_l1_completed", type: "boolean", description: "L1 data collection complete" }, { field: "is_underage", type: "boolean", description: "True if DOB indicates user is under 18" }] },
+  poi_upload: { collects: [{ field: "document_type", type: "enum: passport | national_id | driving_licence", required: true, description: "Type of identity document" }, { field: "document_front", type: "base64 string", required: true, description: "Front image of the document" }, { field: "document_back", type: "base64 string", required: false, description: "Back image (required for national ID)" }], stores: ["kyc_l2_document", "sumsub_applicant_id"], returns: [{ field: "poi_status", type: "enum: verified | review | rejected", description: "Document verification outcome" }, { field: "sumsub_applicant_id", type: "string", description: "SumSub applicant reference for future calls" }] },
+  processing: { collects: [], stores: ["seon_check_result", "risk_score"], returns: [{ field: "passed", type: "boolean", description: "Whether the automated check passed" }, { field: "score", type: "number 0-100", description: "Risk score where applicable" }, { field: "status", type: "enum: passed | review | blocked", description: "Check outcome" }] },
+  username: { collects: [{ field: "username", type: "string 3-20 chars", required: true, description: "Desired unique display name" }], stores: ["display_name"], returns: [{ field: "username", type: "string", description: "Confirmed unique username" }, { field: "available", type: "boolean", description: "Whether the chosen username was available" }] },
+  pin_setup: { collects: [{ field: "pin", type: "string(6) digits", required: true, description: "6-digit PIN — client must hash with PBKDF2 before sending" }], stores: ["sca_pin_hash"], returns: [{ field: "pin_set", type: "boolean", description: "PIN stored successfully" }, { field: "sca_method", type: "string", description: "Registered SCA method: pin" }] },
+  device_binding: { collects: [{ field: "device_public_key", type: "base64 EC P-256 public key", required: true, description: "Public key from the device-generated key pair" }, { field: "device_fingerprint", type: "string", required: true, description: "Device attestation token (Apple/Android/TPM)" }], stores: ["bound_device", "device_key_pair"], returns: [{ field: "device_id", type: "string", description: "UTH device identifier" }, { field: "binding_token", type: "JWT", description: "Device-bound token for future SCA challenges" }] },
+  biometric: { collects: [{ field: "biometric_type", type: "enum: face_id | touch_id | fingerprint", required: true, description: "Biometric method to enrol" }, { field: "biometric_public_key", type: "base64", required: true, description: "Public key registered to biometric authenticator" }], stores: ["biometric_enrollment"], returns: [{ field: "biometric_enabled", type: "boolean", description: "Biometric login activated" }, { field: "biometric_type", type: "string", description: "Enrolled biometric method" }] },
+  aml_form: { collects: [{ field: "occupation", type: "string", required: true, description: "User's declared occupation" }, { field: "source_of_funds", type: "enum: salary | business | investments | savings | other", required: true, description: "Primary source of funds" }, { field: "expected_monthly_volume", type: "enum: <1k | 1k-10k | >10k", required: true, description: "Expected monthly transaction volume in EUR" }, { field: "is_pep", type: "boolean", required: true, description: "Whether user is a Politically Exposed Person" }], stores: ["aml_questionnaire"], returns: [{ field: "aml_completed", type: "boolean", description: "AML questionnaire submitted successfully" }, { field: "aml_risk_score", type: "number 0-100", description: "AML risk score derived from answers" }] },
+  enhanced_aml_form: { collects: [{ field: "purpose", type: "string", required: true, description: "Purpose of opening the account" }, { field: "transaction_types", type: "string[]", required: true, description: "Expected transaction types" }, { field: "acting_for_third_party", type: "boolean", required: true, description: "Whether user acts on behalf of a third party" }, { field: "declaration_accepted", type: "boolean", required: true, description: "User confirmed accuracy of all information" }], stores: ["enhanced_aml_questionnaire"], returns: [{ field: "enhanced_aml_completed", type: "boolean", description: "Enhanced AML submitted" }, { field: "compliance_hold", type: "boolean", description: "Whether account requires compliance team review" }] },
+  system_progress: { collects: [], stores: ["wallet", "account_limits", "notification_preferences"], returns: [{ field: "wallet_id", type: "string", description: "Provisioned wallet identifier" }, { field: "account_number", type: "string", description: "Assigned account number" }, { field: "iban", type: "string | null", description: "IBAN if provisioned" }] },
+  success: { collects: [], stores: [], returns: [{ field: "onboarding_completed", type: "boolean", description: "Full onboarding flow complete" }, { field: "account_status", type: "enum: active | pending_review", description: "Final account status" }, { field: "access_token", type: "JWT", description: "Session access token for the newly onboarded user" }] },
+  gateway: { collects: [{ field: "branch_id", type: "string", required: true, description: "ID of the chosen branch from the branches array in the response" }], stores: ["decision_path"], returns: [{ field: "branch_label", type: "string", description: "Label of the chosen branch" }, { field: "next_screen_id", type: "string | null", description: "ID of the next screen in the chosen branch, or null if flow ends" }] },
+  terminal_block: { collects: [], stores: ["block_reason"], returns: [{ field: "blocked", type: "true", description: "Flow terminated — registration cannot proceed" }, { field: "block_reason", type: "string", description: "Machine-readable reason code" }] },
+  terminal_wait: { collects: [], stores: ["pending_reason"], returns: [{ field: "status", type: "enum: pending_review | waitlisted", description: "User is in a non-blocking waiting state" }, { field: "estimated_wait", type: "string | null", description: "Estimated review time if available" }] },
+};
+
+interface EventBinding {
+  id: string;
+  eventName: string;
+  category: string;
+  description: string;
+  trigger: string;
+  flowId: string | null;
+  webhookUrl: string;
+  isSystem: boolean;
+  active: boolean;
+  createdAt: string;
+}
+
+const SYSTEM_EVENTS: Omit<EventBinding, "id" | "flowId" | "webhookUrl" | "createdAt">[] = [
+  { eventName: "login", category: "Authentication", description: "User attempts to log in. Trigger flows for SCA challenge, new-device binding, or step-up verification.", trigger: "POST /api/auth/login or SDK auth.signIn()", isSystem: true, active: true },
+  { eventName: "user.created", category: "Lifecycle", description: "New user registration. Trigger full onboarding flow including KYC collection and account provisioning.", trigger: "POST /api/users or SDK users.create()", isSystem: true, active: true },
+  { eventName: "verification.tier_upgrade", category: "KYC", description: "User requests access to a higher product tier requiring enhanced KYC (e.g. to increase limits or unlock features).", trigger: "POST /api/users/:id/verification or SDK kyc.upgrade()", isSystem: true, active: true },
+  { eventName: "limit.exceeded", category: "Risk", description: "User hits a transaction limit that requires identity verification before the transaction can proceed.", trigger: "Emitted internally by transaction engine when limit threshold is crossed", isSystem: true, active: true },
+  { eventName: "watchlist.cap", category: "Risk", description: "User reaches a watchlist cap — requires enhanced AML questionnaire and compliance review before proceeding.", trigger: "Emitted by AML/screening engine on watchlist match or velocity cap", isSystem: true, active: true },
+  { eventName: "sca.required", category: "Authentication", description: "Strong Customer Authentication challenge required (PSD2 / RTS). Triggers PIN or biometric verification.", trigger: "Emitted by payment engine on high-value or cross-border transactions", isSystem: true, active: true },
+  { eventName: "device.new", category: "Authentication", description: "Login from an unrecognized device. Trigger device binding confirmation flow.", trigger: "Emitted by auth engine when device fingerprint is not in the bound-devices list", isSystem: true, active: true },
+  { eventName: "aml.review_required", category: "Compliance", description: "AML engine flagged the user for enhanced due diligence. Trigger extended AML questionnaire flow.", trigger: "Emitted by risk engine on elevated AML score or manual compliance escalation", isSystem: true, active: true },
+];
+
+const EVENTS_KEY = "onboarding_events_v1";
+
+function loadEvents(): EventBinding[] {
+  if (typeof window === "undefined") return [];
+  try { const raw = localStorage.getItem(EVENTS_KEY); if (raw) return JSON.parse(raw); } catch {}
+  const seeded: EventBinding[] = SYSTEM_EVENTS.map(e => ({ ...e, id: genId("ev"), flowId: null, webhookUrl: "", createdAt: new Date().toISOString() }));
+  try { localStorage.setItem(EVENTS_KEY, JSON.stringify(seeded)); } catch {}
+  return seeded;
+}
+function saveEvents(events: EventBinding[]) { try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events)); } catch {} }
+
+// ─── EVENT BINDINGS TAB ───────────────────────────────────────────────────────
+function collectNodesInOrder(flow: NamedFlow, startId: string | null, depth = 0): { nodeId: string; depth: number }[] {
+  if (!startId || depth > 50) return [];
+  const node = flow.nodes[startId];
+  if (!node) return [];
+  if (node.kind === "step") return [{ nodeId: startId, depth }, ...collectNodesInOrder(flow, node.next, depth)];
+  return [{ nodeId: startId, depth }, ...node.branches.flatMap(b => collectNodesInOrder(flow, b.next, depth + 1))];
+}
+
+function ApiSpecModal({ event, flow, steps, onClose }: { event: EventBinding; flow: NamedFlow | null; steps: StepDef[]; onClose: () => void }) {
+  const [codeTab, setCodeTab] = useState<"curl" | "js" | "protocol">("protocol");
+  const stepMap = Object.fromEntries(steps.map(s => [s.id, s]));
+  const nodes = flow ? collectNodesInOrder(flow, flow.startNodeId) : [];
+
+  const baseUrl = "https://api.uth.io/v1";
+  const curlInit = `# 1. Initiate a flow session for the "${event.eventName}" event
+curl -X POST ${baseUrl}/flows/session \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "event": "${event.eventName}",
+    "userId": "usr_abc123",
+    "clientId": "app_xyz",
+    "context": {
+      "ip": "192.168.1.1",
+      "device_id": "dev_xxx",
+      "user_agent": "Mozilla/5.0 ..."
+    }
+  }'
+
+# Response → contains sessionId + first screen
+# -----------------------------------------------
+
+# 2. Submit data for a step (repeat for each screen)
+curl -X POST ${baseUrl}/flows/session/{sessionId}/step \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "stepId": "mobile_verification",
+    "data": {
+      "phone_number": "+44771234567",
+      "otp_code": "847291"
+    }
+  }'`;
+
+  const jsCode = `import { UTHClient } from "@uth/sdk";
+
+const uth = new UTHClient({ apiKey: process.env.UTH_API_KEY });
+
+// Initiate flow for the "${event.eventName}" event
+const session = await uth.flows.initiate({
+  event: "${event.eventName}",
+  userId: currentUser.id,
+  context: {
+    ip: request.ip,
+    deviceId: deviceFingerprint,
+  },
+});
+
+// UTH returns the first screen to render
+console.log(session.screen);
+// → { id: "mobile_verification", type: "mobile_otp", label: "Mobile Verification",
+//     collectsData: ["phone_number", "otp_code"], isOptional: false }
+
+// When user completes a step on the client side:
+async function handleStepComplete(stepId: string, data: Record<string, unknown>) {
+  const result = await uth.flows.submitStep({
+    sessionId: session.sessionId,
+    stepId,
+    data,
+  });
+
+  if (result.status === "completed") {
+    // All screens done — result.collectedData has the full payload
+    return onFlowComplete(result);
+  }
+  if (result.screen) {
+    // Render the next screen
+    return renderScreen(result.screen);
+  }
+  if (result.gateway) {
+    // Show a branch selection UI
+    return renderGateway(result.gateway);
+  }
+}`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <code className="text-indigo-400 text-sm font-mono font-bold">{event.eventName}</code>
+              <Badge className="text-[10px] border border-zinc-700 text-zinc-400">{event.category}</Badge>
+              {flow && <Badge className="text-[10px] border border-green-500/30 text-green-400">→ {flow.name}</Badge>}
+            </div>
+            <p className="text-zinc-500 text-xs mt-0.5">{event.description}</p>
+          </div>
+          <button onClick={onClose} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="flex border-b border-zinc-800 px-6 gap-1">
+          {([["protocol", "Flow Protocol"], ["curl", "cURL"], ["js", "JavaScript SDK"]] as const).map(([id, label]) => (
+            <button key={id} onClick={() => setCodeTab(id)} className={`px-3 py-2 text-xs border-b-2 -mb-px cursor-pointer transition-colors ${codeTab === id ? "border-indigo-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>{label}</button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {codeTab === "protocol" && (
+            <div className="space-y-5">
+              <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-2">
+                <p className="text-xs font-semibold text-zinc-400">Trigger</p>
+                <code className="text-indigo-300 text-xs">{event.trigger}</code>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-white mb-3">Initiation Request → Response</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+                    <p className="text-[10px] text-zinc-500 font-mono mb-2">POST /v1/flows/session</p>
+                    <pre className="text-[11px] text-zinc-300 font-mono leading-relaxed">{JSON.stringify({ event: event.eventName, userId: "usr_abc123", clientId: "app_xyz", context: { ip: "x.x.x.x", device_id: "dev_xxx" } }, null, 2)}</pre>
+                  </div>
+                  <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+                    <p className="text-[10px] text-zinc-500 font-mono mb-2">200 OK — first screen</p>
+                    <pre className="text-[11px] text-zinc-300 font-mono leading-relaxed">{JSON.stringify({ sessionId: "fls_xxxx", totalScreens: nodes.filter(n => flow?.nodes[n.nodeId]?.kind === "step").length, currentStep: 1, screen: { id: flow && nodes[0] && flow.nodes[nodes[0].nodeId]?.kind === "step" ? (flow.nodes[nodes[0].nodeId] as any).stepId : "screen_id", type: "mobile_otp", isOptional: false } }, null, 2)}</pre>
+                  </div>
+                </div>
+              </div>
+
+              {flow ? (
+                <div>
+                  <p className="text-sm font-semibold text-white mb-3">Screen Sequence — {flow.name} ({flow.device})</p>
+                  <div className="space-y-2">
+                    {nodes.map(({ nodeId, depth }) => {
+                      const node = flow.nodes[nodeId];
+                      if (!node) return null;
+                      if (node.kind === "gateway") {
+                        return (
+                          <div key={nodeId} style={{ marginLeft: depth * 16 }} className="border border-amber-700/40 bg-amber-500/5 rounded-lg px-4 py-3">
+                            <p className="text-xs text-amber-400 font-semibold">⑂ GATEWAY: {node.question}</p>
+                            <p className="text-[10px] text-zinc-500 mt-1">Client receives <code className="font-mono text-zinc-400">gateway</code> object with branches array. Send chosen <code className="font-mono text-zinc-400">branch_id</code> back.</p>
+                            <div className="flex gap-2 mt-1.5 flex-wrap">
+                              {node.branches.map(b => <code key={b.id} className="text-[10px] text-amber-300 font-mono bg-zinc-800 px-2 py-0.5 rounded">{b.label}</code>)}
+                            </div>
+                          </div>
+                        );
+                      }
+                      const stepDef = stepMap[node.stepId];
+                      const schema = SCREEN_SCHEMAS[stepDef?.screenType ?? ""] ?? { collects: [], stores: [], returns: [] };
+                      return (
+                        <div key={nodeId} style={{ marginLeft: depth * 16 }} className="border border-zinc-800 bg-zinc-950 rounded-lg p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span>{stepDef?.icon}</span>
+                            <span className="text-white text-xs font-medium">{stepDef?.label ?? node.stepId}</span>
+                            <code className="text-[10px] text-zinc-500 font-mono">{node.stepId}</code>
+                            {stepDef?.isTerminal && <Badge className="text-[9px] border border-orange-500/30 text-orange-400">terminal</Badge>}
+                          </div>
+                          {schema.collects.length > 0 && (
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-[10px] text-zinc-600 uppercase tracking-wide mb-1">Client sends</p>
+                                <div className="space-y-1">
+                                  {schema.collects.map(c => (
+                                    <div key={c.field} className="flex items-start gap-1.5 text-[10px]">
+                                      <code className="text-indigo-300 font-mono whitespace-nowrap">{c.field}</code>
+                                      <span className="text-zinc-600">:</span>
+                                      <span className="text-zinc-400">{c.type}</span>
+                                      {c.required && <span className="text-red-400 shrink-0">*</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-zinc-600 uppercase tracking-wide mb-1">UTH returns</p>
+                                <div className="space-y-1">
+                                  {schema.returns.map(r => (
+                                    <div key={r.field} className="flex items-start gap-1.5 text-[10px]">
+                                      <code className="text-green-300 font-mono whitespace-nowrap">{r.field}</code>
+                                      <span className="text-zinc-600">:</span>
+                                      <span className="text-zinc-400">{r.type}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          {schema.collects.length === 0 && (
+                            <p className="text-[10px] text-zinc-600">Automated step — no client input required. UTH processes internally and advances.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {nodes.length === 0 && <p className="text-zinc-600 text-xs text-center py-4">Flow has no steps yet. Add steps in Flow Builder.</p>}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-6 text-center">
+                  <p className="text-zinc-400 text-sm">No flow bound to this event.</p>
+                  <p className="text-zinc-600 text-xs mt-1">Bind a flow using the event settings to see the full screen sequence and data contract.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {codeTab === "curl" && (
+            <pre className="text-[11px] text-zinc-300 font-mono leading-relaxed bg-zinc-950 border border-zinc-800 rounded-xl p-5 overflow-x-auto whitespace-pre">{curlInit}</pre>
+          )}
+
+          {codeTab === "js" && (
+            <pre className="text-[11px] text-zinc-300 font-mono leading-relaxed bg-zinc-950 border border-zinc-800 rounded-xl p-5 overflow-x-auto whitespace-pre">{jsCode}</pre>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EventBindingsTab({ flows, steps, events, setEvents, onRunWalkthrough }: {
+  flows: NamedFlow[]; steps: StepDef[];
+  events: EventBinding[]; setEvents: (e: EventBinding[]) => void;
+  onRunWalkthrough: (flowId: string) => void;
+}) {
+  const [selected, setSelected] = useState<EventBinding | null>(null);
+  const [showSpec, setShowSpec] = useState(false);
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [newEvent, setNewEvent] = useState({ eventName: "", category: "Custom", description: "", trigger: "" });
+
+  const flowMap = Object.fromEntries(flows.map(f => [f.id, f]));
+  const categories = Array.from(new Set(events.map(e => e.category)));
+
+  const bindFlow = (eventId: string, flowId: string | null) => {
+    const updated = events.map(e => e.id === eventId ? { ...e, flowId } : e);
+    setEvents(updated); saveEvents(updated);
+    if (selected?.id === eventId) setSelected(prev => prev ? { ...prev, flowId } : null);
+  };
+  const setWebhook = (eventId: string, url: string) => {
+    const updated = events.map(e => e.id === eventId ? { ...e, webhookUrl: url } : e);
+    setEvents(updated); saveEvents(updated);
+    if (selected?.id === eventId) setSelected(prev => prev ? { ...prev, webhookUrl: url } : null);
+  };
+  const toggleActive = (eventId: string) => {
+    const updated = events.map(e => e.id === eventId ? { ...e, active: !e.active } : e);
+    setEvents(updated); saveEvents(updated);
+  };
+  const addCustomEvent = () => {
+    if (!newEvent.eventName) return;
+    const ev: EventBinding = { id: genId("ev"), ...newEvent, flowId: null, webhookUrl: "", isSystem: false, active: true, createdAt: new Date().toISOString() };
+    const updated = [...events, ev];
+    setEvents(updated); saveEvents(updated); setShowAddEvent(false);
+    setNewEvent({ eventName: "", category: "Custom", description: "", trigger: "" });
+  };
+  const deleteEvent = (id: string) => {
+    const updated = events.filter(e => e.id !== id);
+    setEvents(updated); saveEvents(updated);
+    if (selected?.id === id) setSelected(null);
+  };
+
+  const catColors: Record<string, string> = { Authentication: "text-indigo-400 border-indigo-500/30 bg-indigo-500/10", KYC: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10", Risk: "text-red-400 border-red-500/30 bg-red-500/10", Compliance: "text-orange-400 border-orange-500/30 bg-orange-500/10", Lifecycle: "text-green-400 border-green-500/30 bg-green-500/10", Custom: "text-zinc-400 border-zinc-700 bg-zinc-800" };
+
+  return (
+    <div className="flex h-[calc(100vh-180px)]">
+      <div className="flex-1 overflow-auto p-4 sm:p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-white">Event Bindings</h2>
+            <p className="text-zinc-500 text-xs mt-0.5">Bind application events to onboarding flows. UTH will return the screen sequence and data contracts to your client app.</p>
+          </div>
+          <button onClick={() => setShowAddEvent(true)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Custom Event</button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2">
+          {categories.map(cat => {
+            const catEvents = events.filter(e => e.category === cat);
+            return (
+              <div key={cat} className="space-y-1.5">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest px-1">{cat}</p>
+                {catEvents.map(ev => {
+                  const boundFlow = ev.flowId ? flowMap[ev.flowId] : null;
+                  const nodeCount = boundFlow ? Object.keys(boundFlow.nodes).length : 0;
+                  const isSelected = selected?.id === ev.id;
+                  return (
+                    <div key={ev.id} onClick={() => setSelected(isSelected ? null : ev)} className={`rounded-xl border p-4 cursor-pointer transition-colors ${isSelected ? "border-indigo-500 bg-indigo-500/5" : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"}`}>
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <code className="text-white text-xs font-mono font-semibold">{ev.eventName}</code>
+                            <Badge className={`text-[9px] border ${catColors[ev.category] ?? catColors.Custom}`}>{ev.category}</Badge>
+                            {ev.isSystem && <Badge className="text-[9px] border border-zinc-700 text-zinc-500">system</Badge>}
+                            {!ev.active && <Badge className="text-[9px] border border-zinc-700 text-zinc-600">inactive</Badge>}
+                          </div>
+                          <p className="text-zinc-500 text-[11px] mt-1">{ev.description}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          {boundFlow ? (
+                            <div className="space-y-0.5">
+                              <p className="text-green-400 text-[10px]">→ {boundFlow.name}</p>
+                              <p className="text-zinc-600 text-[10px]">{nodeCount} nodes · {boundFlow.device}</p>
+                            </div>
+                          ) : (
+                            <p className="text-zinc-600 text-[10px]">unbound</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {isSelected && (
+                        <div className="mt-4 pt-4 border-t border-zinc-800 space-y-3" onClick={e => e.stopPropagation()}>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[10px] text-zinc-500 mb-1">Bound Flow</label>
+                              <select value={ev.flowId ?? ""} onChange={e => bindFlow(ev.id, e.target.value || null)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+                                <option value="">— not bound —</option>
+                                {flows.map(f => <option key={f.id} value={f.id}>{f.name} ({f.device})</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-zinc-500 mb-1">Webhook URL (on completion)</label>
+                              <input value={ev.webhookUrl} onChange={e => setWebhook(ev.id, e.target.value)} placeholder="https://your-app.io/webhooks/uth" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => { setShowSpec(true); }} className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/30 rounded-lg px-3 py-1.5 cursor-pointer">View API Spec</button>
+                            {boundFlow && <button onClick={() => { onRunWalkthrough(boundFlow.id); }} className="flex items-center gap-1.5 text-xs text-green-400 hover:text-green-300 border border-green-500/30 rounded-lg px-3 py-1.5 cursor-pointer"><Play className="w-3 h-3" /> Run Walkthrough</button>}
+                            <button onClick={() => toggleActive(ev.id)} className="text-xs text-zinc-500 hover:text-white border border-zinc-700 rounded-lg px-3 py-1.5 cursor-pointer">{ev.active ? "Deactivate" : "Activate"}</button>
+                            {!ev.isSystem && <button onClick={() => deleteEvent(ev.id)} className="text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg px-3 py-1.5 cursor-pointer ml-auto"><Trash2 className="w-3 h-3" /></button>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 mt-2">
+          <p className="text-xs font-semibold text-white mb-2">How it works</p>
+          <ol className="space-y-2 text-xs text-zinc-400 list-decimal list-inside leading-relaxed">
+            <li>Your client app fires an event (e.g. <code className="text-indigo-300 font-mono">login</code>) to UTH with the user ID and context.</li>
+            <li>UTH looks up the bound flow for that event and creates a session (<code className="text-indigo-300 font-mono">sessionId</code>).</li>
+            <li>UTH returns the first <code className="text-indigo-300 font-mono">screen</code> object describing what data to collect, the screen type, and whether it&apos;s optional.</li>
+            <li>Your client renders the screen, collects the data, and <code className="text-indigo-300 font-mono">POST</code>s it back to UTH.</li>
+            <li>UTH validates the data, stores relevant fields, and returns the next screen — or a <code className="text-indigo-300 font-mono">gateway</code> for branching, or <code className="text-indigo-300 font-mono">completed</code> with the full payload.</li>
+            <li>If a webhook URL is set, UTH calls it on flow completion with the collected data and the outcome.</li>
+          </ol>
+        </div>
+      </div>
+
+      {showSpec && selected && (
+        <ApiSpecModal event={selected} flow={selected.flowId ? flowMap[selected.flowId] ?? null : null} steps={steps} onClose={() => setShowSpec(false)} />
+      )}
+
+      {showAddEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-lg shadow-2xl p-6 space-y-3">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-white font-bold">Add Custom Event</h3>
+              <button onClick={() => setShowAddEvent(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] text-zinc-500 mb-1">Event Name <span className="text-zinc-600">(dot-notation, e.g. payment.pending)</span></label>
+                <input value={newEvent.eventName} onChange={e => setNewEvent(p => ({ ...p, eventName: e.target.value }))} placeholder="my.custom.event" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-zinc-500 mb-1">Category</label>
+                <input value={newEvent.category} onChange={e => setNewEvent(p => ({ ...p, category: e.target.value }))} placeholder="Custom" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-zinc-500 mb-1">Description</label>
+                <input value={newEvent.description} onChange={e => setNewEvent(p => ({ ...p, description: e.target.value }))} placeholder="When and why this event fires" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-zinc-500 mb-1">Trigger / Source</label>
+                <input value={newEvent.trigger} onChange={e => setNewEvent(p => ({ ...p, trigger: e.target.value }))} placeholder="POST /api/your-endpoint or SDK call" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowAddEvent(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button>
+              <button onClick={addCustomEvent} disabled={!newEvent.eventName} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Add Event</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function OnboardingPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [tab, setTab] = useState<"registry" | "builder" | "walkthrough">("builder");
+  const [tab, setTab] = useState<"registry" | "builder" | "walkthrough" | "events">("builder");
   const [steps, setSteps] = useState<StepDef[]>(() => loadSteps());
   const [flows, setFlows] = useState<NamedFlow[]>(() => loadFlows());
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(() => flows[0]?.id ?? null);
+  const [events, setEvents] = useState<EventBinding[]>(() => loadEvents());
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -1078,6 +1526,8 @@ export default function OnboardingPage() {
     </div>
   );
 
+  const boundCount = events.filter(e => e.flowId).length;
+
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <DashNav user={user} />
@@ -1085,21 +1535,23 @@ export default function OnboardingPage() {
         <Workflow className="w-5 h-5 text-indigo-400" />
         <div>
           <h1 className="text-base font-bold text-white">Onboarding Flow Engine</h1>
-          <p className="text-zinc-500 text-xs">Step registry, flow builder, and full walkthrough simulation</p>
+          <p className="text-zinc-500 text-xs">Step registry, flow builder, event bindings, and full walkthrough simulation</p>
         </div>
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-500">
           <span className="flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5 text-green-400" />{steps.filter(s => !s.isTerminal).length} steps</span>
           <span className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-orange-400" />{steps.filter(s => s.isTerminal).length} terminal screens</span>
           <span className="flex items-center gap-1"><Workflow className="w-3.5 h-3.5 text-indigo-400" />{flows.length} flows</span>
+          <span className="flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5 text-indigo-400" />{boundCount}/{events.length} events bound</span>
         </div>
       </div>
       <div className="border-b border-zinc-800 px-6 flex gap-1">
-        {([["builder", "Flow Builder"], ["registry", "Step Registry"], ["walkthrough", "Walkthrough"]] as const).map(([t, l]) => (
+        {([["builder", "Flow Builder"], ["registry", "Step Registry"], ["events", "Event Bindings"], ["walkthrough", "Walkthrough"]] as const).map(([t, l]) => (
           <button key={t} onClick={() => setTab(t)} className={`px-3 py-2.5 text-xs border-b-2 -mb-px cursor-pointer transition-colors ${tab === t ? "border-indigo-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>{l}</button>
         ))}
       </div>
       {tab === "registry" && <StepRegistryTab steps={steps} setSteps={setSteps} />}
       {tab === "builder" && <FlowBuilderTab steps={steps} flows={flows} setFlows={setFlows} onRunWalkthrough={id => { setSelectedFlowId(id); setTab("walkthrough"); }} />}
+      {tab === "events" && <EventBindingsTab flows={flows} steps={steps} events={events} setEvents={setEvents} onRunWalkthrough={id => { setSelectedFlowId(id); setTab("walkthrough"); }} />}
       {tab === "walkthrough" && <WalkthroughTab steps={steps} flows={flows} selectedFlowId={selectedFlowId} setSelectedFlowId={setSelectedFlowId} />}
     </div>
   );
