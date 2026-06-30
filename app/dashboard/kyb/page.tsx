@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -83,12 +83,35 @@ const COUNTRY_RISK: Record<string, "Low" | "Medium" | "High" | "Prohibited"> = {
   "Tajikistan": "High", "Tanzania": "High", "Trinidad and Tobago": "High", "Tunisia": "High",
   "Turkmenistan": "High", "Uganda": "High", "Uzbekistan": "High", "Zambia": "High",
 };
-const COUNTRY_LIST = Object.keys(COUNTRY_RISK).sort();
+// Mutable overlay so editors can override or add countries at runtime and persist to localStorage.
+const COUNTRY_RISK_OVERRIDES_KEY = "kyb_country_risk_v1";
+let _countryOverrides: Record<string, "Low" | "Medium" | "High" | "Prohibited"> = {};
+
+function loadCountryOverrides(): Record<string, "Low" | "Medium" | "High" | "Prohibited"> {
+  if (typeof window === "undefined") return {};
+  try { const r = localStorage.getItem(COUNTRY_RISK_OVERRIDES_KEY); return r ? JSON.parse(r) : {}; } catch { return {}; }
+}
+function saveCountryOverrides(o: Record<string, "Low" | "Medium" | "High" | "Prohibited">) {
+  try { localStorage.setItem(COUNTRY_RISK_OVERRIDES_KEY, JSON.stringify(o)); } catch {}
+}
+function applyCountryOverride(country: string, risk: "Low" | "Medium" | "High" | "Prohibited") {
+  _countryOverrides = { ..._countryOverrides, [country]: risk };
+  saveCountryOverrides(_countryOverrides);
+}
+function removeCountryOverride(country: string) {
+  const o = { ..._countryOverrides }; delete o[country];
+  _countryOverrides = o; saveCountryOverrides(o);
+}
+function getCountryRiskMap(): Record<string, "Low" | "Medium" | "High" | "Prohibited"> {
+  return { ...COUNTRY_RISK, ..._countryOverrides };
+}
+function getCountryList(): string[] { return Object.keys(getCountryRiskMap()).sort(); }
+
 function countryRisk(c: string): "Low" | "Medium" | "High" {
-  const r = COUNTRY_RISK[c] ?? "High";
+  const r = getCountryRiskMap()[c] ?? "High";
   return r === "Prohibited" ? "High" : r;
 }
-function isProhibited(c: string) { return COUNTRY_RISK[c] === "Prohibited"; }
+function isProhibited(c: string) { return getCountryRiskMap()[c] === "Prohibited"; }
 
 const INDUSTRY_RISK: Record<string, "Low" | "Medium" | "High"> = {
   "E-commerce – Physical Goods": "Low",
@@ -348,6 +371,7 @@ export default function KYBPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    _countryOverrides = loadCountryOverrides();
     fetch("/api/auth/me").then(async r => {
       if (r.status === 401) { router.push("/login"); return; }
       const d = await r.json();
@@ -419,6 +443,7 @@ export default function KYBPage() {
           {activeTab === "checkout" && <CheckoutTab data={data} setData={setData} />}
           {activeTab === "calculator" && <RiskCalcTab />}
           {activeTab === "countries" && <CountryRiskTab />}
+
         </div>
       </div>
     </div>
@@ -603,9 +628,9 @@ function AddClientWizard({ onClose, onSave, user }: { onClose: () => void; onSav
               <SelectField label="Regulated / Non-regulated" value={form.regulated} onChange={v => set("regulated", v)} options={["No", "Yes – FIU Estonia VASP", "Yes – MGA Malta", "Yes – UKGC", "Yes – BaFin", "Yes – AMF France", "Yes – Other"]} />
               <Field label="Licence" value={form.licence} onChange={v => set("licence", v)} />
               <Field label="Licence Expiry" type="date" value={form.licenceExpiry} onChange={v => set("licenceExpiry", v)} />
-              <SelectField label="POI Country" value={form.poiCountry} onChange={v => set("poiCountry", v)} options={COUNTRY_LIST} />
+              <SelectField label="POI Country" value={form.poiCountry} onChange={v => set("poiCountry", v)} options={getCountryList()} />
               <Field label="POI Expiry" type="date" value={form.poiExpiry} onChange={v => set("poiExpiry", v)} />
-              <SelectField label="POR Country" value={form.porCountry} onChange={v => set("porCountry", v)} options={COUNTRY_LIST} />
+              <SelectField label="POR Country" value={form.porCountry} onChange={v => set("porCountry", v)} options={getCountryList()} />
               <Field label="Folder (GDrive link)" value={form.folder} onChange={v => set("folder", v)} />
               <Field label="Jira Task" value={form.jiraTask} onChange={v => set("jiraTask", v)} />
               <div className="flex items-center gap-3 col-span-2 bg-zinc-800 rounded-lg p-3">
@@ -618,11 +643,11 @@ function AddClientWizard({ onClose, onSave, user }: { onClose: () => void; onSav
             <div className="space-y-3">
               <p className="text-xs text-zinc-400">Configure all risk factors. Licence required, Nominee/Trust ownership, and PEP/RCA are mandatory High-risk triggers — they override the calculated score.</p>
               <div className="grid grid-cols-2 gap-3">
-                <SelectField label="Country of Incorporation (10%)" value={rf.countryOfIncorporation} onChange={v => setRf("countryOfIncorporation", v)} options={COUNTRY_LIST} />
+                <SelectField label="Country of Incorporation (10%)" value={rf.countryOfIncorporation} onChange={v => setRf("countryOfIncorporation", v)} options={getCountryList()} />
                 <Field label="Company Age (years, 7%)" type="number" value={String(rf.companyAgeYears)} onChange={v => setRf("companyAgeYears", Number(v) || 0)} />
                 <Field label="Ownership/Control Records Count (8%)" type="number" value={String(rf.ownershipRecords)} onChange={v => setRf("ownershipRecords", Number(v) || 0)} />
-                <SelectField label="UBO Residence (5%)" value={rf.uboResidenceCountry} onChange={v => setRf("uboResidenceCountry", v)} options={COUNTRY_LIST} />
-                <SelectField label="Director Residence (5%)" value={rf.directorResidenceCountry} onChange={v => setRf("directorResidenceCountry", v)} options={COUNTRY_LIST} />
+                <SelectField label="UBO Residence (5%)" value={rf.uboResidenceCountry} onChange={v => setRf("uboResidenceCountry", v)} options={getCountryList()} />
+                <SelectField label="Director Residence (5%)" value={rf.directorResidenceCountry} onChange={v => setRf("directorResidenceCountry", v)} options={getCountryList()} />
                 <SelectField label="Industry / MCC (20%)" value={rf.industry} onChange={v => setRf("industry", v)} options={Object.keys(INDUSTRY_RISK)} />
                 <SelectField label="Product Needed (15%)" value={rf.product} onChange={v => setRf("product", v)} options={Object.keys(PRODUCT_RISK)} />
                 <SelectField label="Geography of Operations (7%)" value={rf.geographyZone} onChange={v => setRf("geographyZone", v as any)} options={["EEA", "UK_GIB", "REST"]} />
@@ -790,10 +815,10 @@ function ClientDetail({ client, onClose, onUpdate }: { client: KybClient; onClos
               <div>
                 <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-2">Edit Risk Factors</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <SelectField label="Country of Incorporation" value={form.riskFactors.countryOfIncorporation} onChange={v => setRf("countryOfIncorporation", v)} options={COUNTRY_LIST} />
+                  <SelectField label="Country of Incorporation" value={form.riskFactors.countryOfIncorporation} onChange={v => setRf("countryOfIncorporation", v)} options={getCountryList()} />
                   <Field label="Company Age (yrs)" type="number" value={String(form.riskFactors.companyAgeYears)} onChange={v => setRf("companyAgeYears", Number(v) || 0)} />
                   <Field label="Ownership records" type="number" value={String(form.riskFactors.ownershipRecords)} onChange={v => setRf("ownershipRecords", Number(v) || 0)} />
-                  <SelectField label="UBO Residence" value={form.riskFactors.uboResidenceCountry} onChange={v => setRf("uboResidenceCountry", v)} options={COUNTRY_LIST} />
+                  <SelectField label="UBO Residence" value={form.riskFactors.uboResidenceCountry} onChange={v => setRf("uboResidenceCountry", v)} options={getCountryList()} />
                   <SelectField label="Industry" value={form.riskFactors.industry} onChange={v => setRf("industry", v)} options={Object.keys(INDUSTRY_RISK)} />
                   <SelectField label="Product" value={form.riskFactors.product} onChange={v => setRf("product", v)} options={Object.keys(PRODUCT_RISK)} />
                 </div>
@@ -913,20 +938,30 @@ function ReverificationsTab({ data, setData }: { data: KybData; setData: (d: Kyb
 }
 
 // ── iGaming tab ───────────────────────────────────────────────────────────────
+const EMPTY_IGAMING: Partial<IGaming> = { date: new Date().toISOString().split("T")[0], companyName: "", status: "Active", licenceTierType: "", licenceJurisdiction: "", website: "", hqCountry: "", folderLink: "", sumsubMonitoring: false, licenceHolder: "", licenceJurisdiction2: "", licenceTypePerm: "Permanent", licenceExpiry: "", assessmentStatus: "Pending", assessmentDate: "", role: "" };
+
 function IGamingTab({ data, setData }: { data: KybData; setData: (d: KybData) => void }) {
   const [search, setSearch] = useState("");
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState<Partial<IGaming>>({ date: new Date().toISOString().split("T")[0], companyName: "", status: "Active", licenceTierType: "", licenceJurisdiction: "", website: "", hqCountry: "", folderLink: "", sumsubMonitoring: false, licenceHolder: "", licenceJurisdiction2: "", licenceTypePerm: "Permanent", licenceExpiry: "", assessmentStatus: "Pending", assessmentDate: "", role: "" });
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<IGaming>>(EMPTY_IGAMING);
 
   const filtered = data.igaming.filter(r => r.companyName.toLowerCase().includes(search.toLowerCase()));
-  const save = () => { const nd = { ...data, igaming: [...data.igaming, { ...form, id: genId("ig") } as IGaming] }; setData(nd); saveData(nd); setShowAdd(false); };
+  const openAdd = () => { setEditId(null); setForm(EMPTY_IGAMING); setShowForm(true); };
+  const openEdit = (r: IGaming) => { setEditId(r.id); setForm({ ...r }); setShowForm(true); };
+  const save = () => {
+    const nd = editId
+      ? { ...data, igaming: data.igaming.map(x => x.id === editId ? { ...form, id: editId } as IGaming : x) }
+      : { ...data, igaming: [...data.igaming, { ...form, id: genId("ig") } as IGaming] };
+    setData(nd); saveData(nd); setShowForm(false);
+  };
   const del = (id: string) => { if (!confirm("Delete?")) return; const nd = { ...data, igaming: data.igaming.filter(r => r.id !== id) }; setData(nd); saveData(nd); };
 
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search iGaming…" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" /></div>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add</button>
+        <button onClick={openAdd} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add</button>
       </div>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-xs">
@@ -946,16 +981,19 @@ function IGamingTab({ data, setData }: { data: KybData; setData: (d: KybData) =>
                   <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.licenceExpiry || "—"}</td>
                   <td className="px-3 py-2 text-zinc-400">{r.assessmentStatus}</td>
                   <td className="px-3 py-2 text-zinc-400">{r.role}</td>
-                  <td className="px-3 py-2"><button onClick={() => del(r.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer p-1"><Trash2 className="w-3.5 h-3.5" /></button></td>
+                  <td className="px-3 py-2"><div className="flex items-center gap-1">
+                    <button onClick={() => openEdit(r)} className="text-zinc-500 hover:text-indigo-400 cursor-pointer p-1"><Edit className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => del(r.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div></td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
-      {showAdd && (
+      {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-xl shadow-2xl p-6 space-y-3">
-            <div className="flex justify-between items-center mb-2"><h3 className="text-white font-bold">Add iGaming License</h3><button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button></div>
+            <div className="flex justify-between items-center mb-2"><h3 className="text-white font-bold">{editId ? "Edit iGaming License" : "Add iGaming License"}</h3><button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button></div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Date" type="date" value={form.date!} onChange={v => setForm(f => ({ ...f, date: v }))} />
               <Field label="Company Name" value={form.companyName!} onChange={v => setForm(f => ({ ...f, companyName: v }))} />
@@ -970,7 +1008,7 @@ function IGamingTab({ data, setData }: { data: KybData; setData: (d: KybData) =>
               <Field label="Assessment Status" value={form.assessmentStatus!} onChange={v => setForm(f => ({ ...f, assessmentStatus: v }))} />
               <Field label="Assessment Date" type="date" value={form.assessmentDate!} onChange={v => setForm(f => ({ ...f, assessmentDate: v }))} />
             </div>
-            <div className="flex justify-end gap-2 pt-2"><button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button><button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save</button></div>
+            <div className="flex justify-end gap-2 pt-2"><button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button><button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save</button></div>
           </div>
         </div>
       )}
@@ -979,20 +1017,30 @@ function IGamingTab({ data, setData }: { data: KybData; setData: (d: KybData) =>
 }
 
 // ── Crypto tab ────────────────────────────────────────────────────────────────
+const EMPTY_CRYPTO: Partial<Crypto> = { date: new Date().toISOString().split("T")[0], companyName: "", status: "Active", licenceType: "VASP", licenceCountry: "", website: "", folder: "", sumsubMonitoring: false, licenceCountry2: "", licenceType2: "", licenceExpiry: "", notes: "", productAssignment: "", entity: "" };
+
 function CryptoTab({ data, setData }: { data: KybData; setData: (d: KybData) => void }) {
   const [search, setSearch] = useState("");
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState<Partial<Crypto>>({ date: new Date().toISOString().split("T")[0], companyName: "", status: "Active", licenceType: "VASP", licenceCountry: "", website: "", folder: "", sumsubMonitoring: false, licenceCountry2: "", licenceType2: "", licenceExpiry: "", notes: "", productAssignment: "", entity: "" });
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<Crypto>>(EMPTY_CRYPTO);
 
   const filtered = data.crypto.filter(r => r.companyName.toLowerCase().includes(search.toLowerCase()));
-  const save = () => { const nd = { ...data, crypto: [...data.crypto, { ...form, id: genId("cr") } as Crypto] }; setData(nd); saveData(nd); setShowAdd(false); };
+  const openAdd = () => { setEditId(null); setForm(EMPTY_CRYPTO); setShowForm(true); };
+  const openEdit = (r: Crypto) => { setEditId(r.id); setForm({ ...r }); setShowForm(true); };
+  const save = () => {
+    const nd = editId
+      ? { ...data, crypto: data.crypto.map(x => x.id === editId ? { ...form, id: editId } as Crypto : x) }
+      : { ...data, crypto: [...data.crypto, { ...form, id: genId("cr") } as Crypto] };
+    setData(nd); saveData(nd); setShowForm(false);
+  };
   const del = (id: string) => { if (!confirm("Delete?")) return; const nd = { ...data, crypto: data.crypto.filter(r => r.id !== id) }; setData(nd); saveData(nd); };
 
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search crypto licenses…" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" /></div>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add</button>
+        <button onClick={openAdd} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add</button>
       </div>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-xs">
@@ -1010,28 +1058,31 @@ function CryptoTab({ data, setData }: { data: KybData; setData: (d: KybData) => 
                   <td className="px-3 py-2 text-zinc-400">{r.productAssignment || "—"}</td>
                   <td className="px-3 py-2 text-zinc-400">{r.entity || "—"}</td>
                   <td className="px-3 py-2 text-zinc-400 max-w-[120px] truncate">{r.notes || "—"}</td>
-                  <td className="px-3 py-2"><button onClick={() => del(r.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer p-1"><Trash2 className="w-3.5 h-3.5" /></button></td>
+                  <td className="px-3 py-2"><div className="flex items-center gap-1">
+                    <button onClick={() => openEdit(r)} className="text-zinc-500 hover:text-indigo-400 cursor-pointer p-1"><Edit className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => del(r.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div></td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
-      {showAdd && (
+      {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-xl shadow-2xl p-6 space-y-3">
-            <div className="flex justify-between items-center mb-2"><h3 className="text-white font-bold">Add Crypto License</h3><button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button></div>
+            <div className="flex justify-between items-center mb-2"><h3 className="text-white font-bold">{editId ? "Edit Crypto License" : "Add Crypto License"}</h3><button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button></div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Date" type="date" value={form.date!} onChange={v => setForm(f => ({ ...f, date: v }))} />
               <Field label="Company Name" value={form.companyName!} onChange={v => setForm(f => ({ ...f, companyName: v }))} />
               <SelectField label="Status" value={form.status!} onChange={v => setForm(f => ({ ...f, status: v }))} options={["Active", "Pending", "Expired", "Revoked"]} />
               <SelectField label="Licence Type" value={form.licenceType!} onChange={v => setForm(f => ({ ...f, licenceType: v }))} options={["VASP", "EMI", "CASP", "Other"]} />
-              <SelectField label="Licence Country" value={form.licenceCountry!} onChange={v => setForm(f => ({ ...f, licenceCountry: v }))} options={COUNTRY_LIST} />
+              <SelectField label="Licence Country" value={form.licenceCountry!} onChange={v => setForm(f => ({ ...f, licenceCountry: v }))} options={getCountryList()} />
               <Field label="Licence Expiry" type="date" value={form.licenceExpiry!} onChange={v => setForm(f => ({ ...f, licenceExpiry: v }))} />
               <Field label="Product Assignment" value={form.productAssignment!} onChange={v => setForm(f => ({ ...f, productAssignment: v }))} />
               <Field label="Entity" value={form.entity!} onChange={v => setForm(f => ({ ...f, entity: v }))} />
               <Field label="Notes" value={form.notes!} onChange={v => setForm(f => ({ ...f, notes: v }))} className="col-span-2" />
             </div>
-            <div className="flex justify-end gap-2 pt-2"><button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button><button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save</button></div>
+            <div className="flex justify-end gap-2 pt-2"><button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button><button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save</button></div>
           </div>
         </div>
       )}
@@ -1040,20 +1091,30 @@ function CryptoTab({ data, setData }: { data: KybData; setData: (d: KybData) => 
 }
 
 // ── Acquiring tab ─────────────────────────────────────────────────────────────
+const EMPTY_ACQUIRING: Partial<Acquiring> = { date: new Date().toISOString().split("T")[0], companyName: "", projectName: "", entity: "", risk: "Medium", responsible: "", salesKam: "", status: "In Progress", date2: "", mid1: "", mid2: "", licenceMccType: "", mccCode: "", website: "", toaLink: "", saqType: "", saqLink: "", projectStage: "", targetDate: "", nextSaqType: "" };
+
 function AcquiringTab({ data, setData }: { data: KybData; setData: (d: KybData) => void }) {
   const [search, setSearch] = useState("");
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState<Partial<Acquiring>>({ date: new Date().toISOString().split("T")[0], companyName: "", projectName: "", entity: "", risk: "Medium", responsible: "", salesKam: "", status: "In Progress", date2: "", mid1: "", mid2: "", licenceMccType: "", mccCode: "", website: "", toaLink: "", saqType: "", saqLink: "", projectStage: "", targetDate: "", nextSaqType: "" });
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<Acquiring>>(EMPTY_ACQUIRING);
 
   const filtered = data.acquiring.filter(r => r.companyName.toLowerCase().includes(search.toLowerCase()) || r.projectName.toLowerCase().includes(search.toLowerCase()));
-  const save = () => { const nd = { ...data, acquiring: [...data.acquiring, { ...form, id: genId("aq") } as Acquiring] }; setData(nd); saveData(nd); setShowAdd(false); };
+  const openAdd = () => { setEditId(null); setForm(EMPTY_ACQUIRING); setShowForm(true); };
+  const openEdit = (r: Acquiring) => { setEditId(r.id); setForm({ ...r }); setShowForm(true); };
+  const save = () => {
+    const nd = editId
+      ? { ...data, acquiring: data.acquiring.map(x => x.id === editId ? { ...form, id: editId } as Acquiring : x) }
+      : { ...data, acquiring: [...data.acquiring, { ...form, id: genId("aq") } as Acquiring] };
+    setData(nd); saveData(nd); setShowForm(false);
+  };
   const del = (id: string) => { if (!confirm("Delete?")) return; const nd = { ...data, acquiring: data.acquiring.filter(r => r.id !== id) }; setData(nd); saveData(nd); };
 
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search acquiring…" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" /></div>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add</button>
+        <button onClick={openAdd} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add</button>
       </div>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-xs">
@@ -1074,16 +1135,19 @@ function AcquiringTab({ data, setData }: { data: KybData; setData: (d: KybData) 
                   <td className="px-3 py-2 text-zinc-400">{r.saqType || "—"}</td>
                   <td className="px-3 py-2 text-zinc-400">{r.projectStage || "—"}</td>
                   <td className="px-3 py-2 text-zinc-400">{r.targetDate || "—"}</td>
-                  <td className="px-3 py-2"><button onClick={() => del(r.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer p-1"><Trash2 className="w-3.5 h-3.5" /></button></td>
+                  <td className="px-3 py-2"><div className="flex items-center gap-1">
+                    <button onClick={() => openEdit(r)} className="text-zinc-500 hover:text-indigo-400 cursor-pointer p-1"><Edit className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => del(r.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div></td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
-      {showAdd && (
+      {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-2xl shadow-2xl p-6 space-y-3 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-2"><h3 className="text-white font-bold">Add Acquiring Project</h3><button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button></div>
+            <div className="flex justify-between items-center mb-2"><h3 className="text-white font-bold">{editId ? "Edit Acquiring Project" : "Add Acquiring Project"}</h3><button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button></div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Date" type="date" value={form.date!} onChange={v => setForm(f => ({ ...f, date: v }))} />
               <Field label="Company Name" value={form.companyName!} onChange={v => setForm(f => ({ ...f, companyName: v }))} />
@@ -1102,7 +1166,7 @@ function AcquiringTab({ data, setData }: { data: KybData; setData: (d: KybData) 
               <Field label="Project Stage" value={form.projectStage!} onChange={v => setForm(f => ({ ...f, projectStage: v }))} />
               <Field label="Target Date" type="date" value={form.targetDate!} onChange={v => setForm(f => ({ ...f, targetDate: v }))} />
             </div>
-            <div className="flex justify-end gap-2 pt-2"><button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button><button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save</button></div>
+            <div className="flex justify-end gap-2 pt-2"><button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button><button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save</button></div>
           </div>
         </div>
       )}
@@ -1111,20 +1175,30 @@ function AcquiringTab({ data, setData }: { data: KybData; setData: (d: KybData) 
 }
 
 // ── Checkout APMs tab ─────────────────────────────────────────────────────────
+const EMPTY_CHECKOUT: Partial<Checkout> = { date: new Date().toISOString().split("T")[0], statusReason: "", notes: "", ticketId: "", merchantUuid: "", website: "" };
+
 function CheckoutTab({ data, setData }: { data: KybData; setData: (d: KybData) => void }) {
   const [search, setSearch] = useState("");
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState<Partial<Checkout>>({ date: new Date().toISOString().split("T")[0], statusReason: "", notes: "", ticketId: "", merchantUuid: "", website: "" });
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<Checkout>>(EMPTY_CHECKOUT);
 
   const filtered = data.checkout.filter(r => r.website.toLowerCase().includes(search.toLowerCase()) || r.ticketId.toLowerCase().includes(search.toLowerCase()));
-  const save = () => { const nd = { ...data, checkout: [...data.checkout, { ...form, id: genId("ch") } as Checkout] }; setData(nd); saveData(nd); setShowAdd(false); };
+  const openAdd = () => { setEditId(null); setForm(EMPTY_CHECKOUT); setShowForm(true); };
+  const openEdit = (r: Checkout) => { setEditId(r.id); setForm({ ...r }); setShowForm(true); };
+  const save = () => {
+    const nd = editId
+      ? { ...data, checkout: data.checkout.map(x => x.id === editId ? { ...form, id: editId } as Checkout : x) }
+      : { ...data, checkout: [...data.checkout, { ...form, id: genId("ch") } as Checkout] };
+    setData(nd); saveData(nd); setShowForm(false);
+  };
   const del = (id: string) => { if (!confirm("Delete?")) return; const nd = { ...data, checkout: data.checkout.filter(r => r.id !== id) }; setData(nd); saveData(nd); };
 
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search checkout APMs…" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" /></div>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add</button>
+        <button onClick={openAdd} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer"><Plus className="w-3.5 h-3.5" /> Add</button>
       </div>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-xs">
@@ -1139,16 +1213,19 @@ function CheckoutTab({ data, setData }: { data: KybData; setData: (d: KybData) =
                   <td className="px-3 py-2 text-zinc-400 font-mono">{r.ticketId}</td>
                   <td className="px-3 py-2 text-zinc-400 font-mono text-[10px]">{r.merchantUuid}</td>
                   <td className="px-3 py-2 text-zinc-400">{r.website}</td>
-                  <td className="px-3 py-2"><button onClick={() => del(r.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer p-1"><Trash2 className="w-3.5 h-3.5" /></button></td>
+                  <td className="px-3 py-2"><div className="flex items-center gap-1">
+                    <button onClick={() => openEdit(r)} className="text-zinc-500 hover:text-indigo-400 cursor-pointer p-1"><Edit className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => del(r.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div></td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
-      {showAdd && (
+      {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-lg shadow-2xl p-6 space-y-3">
-            <div className="flex justify-between items-center mb-2"><h3 className="text-white font-bold">Add Checkout APM</h3><button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button></div>
+            <div className="flex justify-between items-center mb-2"><h3 className="text-white font-bold">{editId ? "Edit Checkout APM" : "Add Checkout APM"}</h3><button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button></div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Date" type="date" value={form.date!} onChange={v => setForm(f => ({ ...f, date: v }))} />
               <Field label="Status / Reason" value={form.statusReason!} onChange={v => setForm(f => ({ ...f, statusReason: v }))} />
@@ -1157,7 +1234,7 @@ function CheckoutTab({ data, setData }: { data: KybData; setData: (d: KybData) =
               <Field label="Website" value={form.website!} onChange={v => setForm(f => ({ ...f, website: v }))} />
               <Field label="Notes" value={form.notes!} onChange={v => setForm(f => ({ ...f, notes: v }))} className="col-span-2" />
             </div>
-            <div className="flex justify-end gap-2 pt-2"><button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button><button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save</button></div>
+            <div className="flex justify-end gap-2 pt-2"><button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button><button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save</button></div>
           </div>
         </div>
       )}
@@ -1179,11 +1256,11 @@ function RiskCalcTab() {
           <button onClick={() => setFactors(defaultFactors())} className="text-xs text-zinc-500 hover:text-white cursor-pointer flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Reset</button>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <SelectField label="Country of Incorporation (10%)" value={factors.countryOfIncorporation} onChange={v => setF("countryOfIncorporation", v)} options={COUNTRY_LIST} />
+          <SelectField label="Country of Incorporation (10%)" value={factors.countryOfIncorporation} onChange={v => setF("countryOfIncorporation", v)} options={getCountryList()} />
           <Field label="Company Age (years, 7%)" type="number" value={String(factors.companyAgeYears)} onChange={v => setF("companyAgeYears", Number(v) || 0)} />
           <Field label="Ownership/Control Records (8%)" type="number" value={String(factors.ownershipRecords)} onChange={v => setF("ownershipRecords", Number(v) || 0)} />
-          <SelectField label="UBO Residence (5%)" value={factors.uboResidenceCountry} onChange={v => setF("uboResidenceCountry", v)} options={COUNTRY_LIST} />
-          <SelectField label="Director Residence (5%)" value={factors.directorResidenceCountry} onChange={v => setF("directorResidenceCountry", v)} options={COUNTRY_LIST} />
+          <SelectField label="UBO Residence (5%)" value={factors.uboResidenceCountry} onChange={v => setF("uboResidenceCountry", v)} options={getCountryList()} />
+          <SelectField label="Director Residence (5%)" value={factors.directorResidenceCountry} onChange={v => setF("directorResidenceCountry", v)} options={getCountryList()} />
           <SelectField label="Industry / MCC (20%)" value={factors.industry} onChange={v => setF("industry", v)} options={Object.keys(INDUSTRY_RISK)} />
           <SelectField label="Product Needed (15%)" value={factors.product} onChange={v => setF("product", v)} options={Object.keys(PRODUCT_RISK)} />
           <SelectField label="Geography of Operations (7%)" value={factors.geographyZone} onChange={v => setF("geographyZone", v as any)} options={["EEA", "UK_GIB", "REST"]} />
@@ -1235,44 +1312,129 @@ function RiskCalcTab() {
 }
 
 // ── Country Risk tab ──────────────────────────────────────────────────────────
+const RISK_LEVELS = ["Low", "Medium", "High", "Prohibited"] as const;
+type RiskLevel = "Low" | "Medium" | "High" | "Prohibited";
+
+function riskCls(risk: RiskLevel) {
+  return risk === "Low" ? "border-green-500/20 bg-green-500/5"
+    : risk === "Medium" ? "border-yellow-500/20 bg-yellow-500/5"
+    : risk === "High" ? "border-red-500/20 bg-red-500/5"
+    : "border-purple-500/20 bg-purple-500/5";
+}
+function riskBadgeCls(risk: RiskLevel) {
+  return risk === "Low" ? "border-green-500/30 text-green-400"
+    : risk === "Medium" ? "border-yellow-500/30 text-yellow-400"
+    : risk === "High" ? "border-red-500/30 text-red-400"
+    : "border-purple-500/30 text-purple-400";
+}
+function riskTextCls(risk: RiskLevel) {
+  return risk === "Low" ? "text-green-400" : risk === "Medium" ? "text-yellow-400" : risk === "High" ? "text-red-400" : "text-purple-400";
+}
+
 function CountryRiskTab() {
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"All" | "Low" | "Medium" | "High" | "Prohibited">("All");
+  const [filter, setFilter] = useState<"All" | RiskLevel>("All");
+  const [version, setVersion] = useState(0); // bump to force re-render after edits
+  const [showAdd, setShowAdd] = useState(false);
+  const [newCountry, setNewCountry] = useState("");
+  const [newRisk, setNewRisk] = useState<RiskLevel>("Medium");
 
-  const countries = Object.entries(COUNTRY_RISK)
+  const map = getCountryRiskMap();
+  const countries = Object.entries(map)
     .filter(([c, r]) => (filter === "All" || r === filter) && c.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => a[0].localeCompare(b[0]));
 
-  const counts = {
-    Low: Object.values(COUNTRY_RISK).filter(r => r === "Low").length,
-    Medium: Object.values(COUNTRY_RISK).filter(r => r === "Medium").length,
-    High: Object.values(COUNTRY_RISK).filter(r => r === "High").length,
-    Prohibited: Object.values(COUNTRY_RISK).filter(r => r === "Prohibited").length,
+  const counts = { Low: 0, Medium: 0, High: 0, Prohibited: 0 };
+  Object.values(map).forEach(r => { counts[r]++; });
+
+  const isOverridden = (c: string) => c in _countryOverrides;
+  const isCustom = (c: string) => !(c in COUNTRY_RISK);
+
+  const changeRisk = (country: string, risk: RiskLevel) => {
+    applyCountryOverride(country, risk);
+    setVersion(v => v + 1);
+  };
+  const resetCountry = (country: string) => {
+    removeCountryOverride(country);
+    setVersion(v => v + 1);
+  };
+  const addCountry = () => {
+    if (!newCountry.trim()) return;
+    applyCountryOverride(newCountry.trim(), newRisk);
+    setVersion(v => v + 1);
+    setNewCountry(""); setShowAdd(false);
   };
 
   return (
     <div>
-      <div className="grid grid-cols-4 gap-3 mb-4">
-        {(["Low", "Medium", "High", "Prohibited"] as const).map(l => (
-          <button key={l} onClick={() => setFilter(f => f === l ? "All" : l)} className={`rounded-xl p-3 border cursor-pointer transition-colors ${filter === l ? (l === "Low" ? "border-green-500 bg-green-500/10" : l === "Medium" ? "border-yellow-500 bg-yellow-500/10" : l === "High" ? "border-red-500 bg-red-500/10" : "border-purple-500 bg-purple-500/10") : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"}`}>
-            <p className={`text-xl font-black ${l === "Low" ? "text-green-400" : l === "Medium" ? "text-yellow-400" : l === "High" ? "text-red-400" : "text-purple-400"}`}>{counts[l]}</p>
-            <p className="text-zinc-400 text-xs">{l}</p>
-          </button>
-        ))}
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="grid grid-cols-4 gap-2 flex-1">
+          {RISK_LEVELS.map(l => (
+            <button key={l} onClick={() => setFilter(f => f === l ? "All" : l)} className={`rounded-xl p-3 border cursor-pointer transition-colors ${filter === l ? (l === "Low" ? "border-green-500 bg-green-500/10" : l === "Medium" ? "border-yellow-500 bg-yellow-500/10" : l === "High" ? "border-red-500 bg-red-500/10" : "border-purple-500 bg-purple-500/10") : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"}`}>
+              <p className={`text-xl font-black ${riskTextCls(l)}`}>{counts[l]}</p>
+              <p className="text-zinc-400 text-xs">{l}</p>
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-lg cursor-pointer shrink-0"><Plus className="w-3.5 h-3.5" /> Add Country</button>
       </div>
+
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search countries…" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" />
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
         {countries.map(([country, risk]) => (
-          <div key={country} className={`rounded-lg px-3 py-2 border flex items-center justify-between ${risk === "Low" ? "border-green-500/20 bg-green-500/5" : risk === "Medium" ? "border-yellow-500/20 bg-yellow-500/5" : risk === "High" ? "border-red-500/20 bg-red-500/5" : "border-purple-500/20 bg-purple-500/5"}`}>
-            <span className="text-xs text-zinc-300">{country}</span>
-            <Badge className={`text-[9px] border ${risk === "Low" ? "border-green-500/30 text-green-400" : risk === "Medium" ? "border-yellow-500/30 text-yellow-400" : risk === "High" ? "border-red-500/30 text-red-400" : "border-purple-500/30 text-purple-400"}`}>{risk}</Badge>
+          <div key={country + version} className={`rounded-lg px-3 py-2 border flex items-center gap-2 ${riskCls(risk as RiskLevel)}`}>
+            <span className="text-xs text-zinc-300 flex-1 truncate">{country}</span>
+            {(isCustom(country) || isOverridden(country)) && (
+              <span className="text-[9px] text-indigo-400 font-mono">custom</span>
+            )}
+            <select value={risk} onChange={e => changeRisk(country, e.target.value as RiskLevel)}
+              className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[10px] text-white focus:outline-none focus:border-indigo-500 cursor-pointer shrink-0">
+              {RISK_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            {isOverridden(country) && (
+              <button onClick={() => resetCountry(country)} title="Reset to default" className="text-zinc-600 hover:text-zinc-400 cursor-pointer shrink-0 text-[10px]">↺</button>
+            )}
+            {isCustom(country) && (
+              <button onClick={() => resetCountry(country)} title="Remove custom country" className="text-zinc-600 hover:text-red-400 cursor-pointer shrink-0"><Trash2 className="w-3 h-3" /></button>
+            )}
           </div>
         ))}
+        {countries.length === 0 && <p className="text-zinc-600 text-xs col-span-3 py-6 text-center">No countries match the filter.</p>}
       </div>
-      <p className="text-zinc-600 text-[10px] mt-3">{countries.length} countries shown · Prohibited countries always force High risk via override.</p>
+      <p className="text-zinc-600 text-[10px] mt-3">
+        {countries.length} countries shown · Changes saved automatically · Prohibited countries force High risk in scoring.
+      </p>
+
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-white font-bold">Add Country</h3>
+              <button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] text-zinc-500 mb-1">Country Name</label>
+                <input value={newCountry} onChange={e => setNewCountry(e.target.value)} placeholder="e.g. Andorra" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-zinc-500 mb-1">Risk Level</label>
+                <select value={newRisk} onChange={e => setNewRisk(e.target.value as RiskLevel)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+                  {RISK_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowAdd(false)} className="text-zinc-400 hover:text-white text-sm cursor-pointer">Cancel</button>
+              <button onClick={addCountry} disabled={!newCountry.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Add</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
