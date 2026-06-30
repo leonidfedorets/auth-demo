@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import {
-  Workflow, CheckCircle, XCircle, Clock, SkipForward, Play,
-  RefreshCw, ChevronRight, ChevronUp, ChevronDown, AlertTriangle,
+  Workflow, CheckCircle, Play,
+  RefreshCw, ChevronUp, ChevronDown, AlertTriangle,
   Plus, Trash2, Edit, X, Smartphone, ShieldCheck, Fingerprint,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -24,39 +24,34 @@ interface StepDef {
   icon: string;
 }
 
-interface UserProfile {
-  country: string;
-  age: number;
-  isUSRelated: boolean;
-  geoBlocked: boolean;
-  waitlisted: boolean;
-  kycL2PoiStatus: "not_started" | "passed" | "rejected" | "review" | "duplicate";
-  kycL3UniquenessStatus: "not_started" | "passed" | "duplicate";
-  kycL3FraudStatus: "not_started" | "passed" | "review" | "failed";
-  kycL3SanctionsStatus: "not_started" | "passed" | "hit";
-  riskLevel: "low" | "medium" | "high";
-  amlStatus: "not_started" | "passed" | "review" | "rejected";
-  deviceSupportsBiometrics: boolean;
+type DeviceTarget = "web" | "mobile" | "tablet";
+
+interface FlowBranch {
+  id: string;
+  label: string;
+  next: string | null;
 }
 
-interface FeatureFlags {
-  invite_mode: boolean;
-  poi_enabled: boolean;
-  seon_screening_enabled: boolean;
-  biometrics_enabled: boolean;
-  enhanced_aml_enabled: boolean;
-  mobile_verification_required: boolean;
-}
+type FlowNode =
+  | { id: string; kind: "step"; stepId: string; next: string | null }
+  | { id: string; kind: "gateway"; question: string; branches: FlowBranch[] };
 
 interface NamedFlow {
   id: string;
   name: string;
   description: string;
-  flags: FeatureFlags;
-  profile: UserProfile;
-  stepIds: string[];
+  device: DeviceTarget;
+  nodes: Record<string, FlowNode>;
+  startNodeId: string | null;
   updatedAt: string;
 }
+
+// A "slot" identifies where in the graph a new node should be attached —
+// either the flow's start, the `next` pointer of a step node, or a gateway branch's `next`.
+type FlowSlot =
+  | { type: "start" }
+  | { type: "next"; nodeId: string }
+  | { type: "branch"; gatewayId: string; branchId: string };
 
 // ─── DEFAULT STEP REGISTRY ────────────────────────────────────────────────────
 const DEFAULT_STEPS: StepDef[] = [
@@ -89,8 +84,10 @@ const DEFAULT_STEPS: StepDef[] = [
   { id: "aml_review_pending", label: "AML Review Pending", category: "Terminal Screen", isTerminal: true, isBlocking: false, isMandatory: false, isOptional: false, description: "Shown when AML questionnaire answers require manual compliance review.", requiredFlags: [], screenType: "terminal_wait", icon: "📌" },
 ];
 
+const ALL_COUNTRIES = ["Germany", "France", "United Kingdom", "Netherlands", "Ireland", "Sweden", "Denmark", "Finland", "Austria", "Belgium", "Switzerland", "Poland", "Spain", "Portugal", "Italy", "United States", "Canada", "Australia", "Brazil", "India", "China", "Thailand", "Vietnam", "Ukraine", "Serbia", "Colombia", "Peru", "Tunisia", "Morocco", "Jordan", "United Arab Emirates", "Nigeria", "Pakistan", "Bangladesh", "Ethiopia", "Algeria", "Egypt", "Kenya", "Tanzania", "Ghana", "Cameroon"];
+
 const STEPS_KEY = "onboarding_steps_v2";
-const FLOWS_KEY = "onboarding_flows_v2";
+const FLOWS_KEY = "onboarding_flows_v3";
 
 function loadSteps(): StepDef[] {
   if (typeof window === "undefined") return DEFAULT_STEPS;
@@ -100,60 +97,139 @@ function loadSteps(): StepDef[] {
 function saveSteps(steps: StepDef[]) { try { localStorage.setItem(STEPS_KEY, JSON.stringify(steps)); } catch {} }
 function genId(p: string) { return `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`; }
 
-// ─── FLOW BUILDER LOGIC ───────────────────────────────────────────────────────
-function buildFlow(profile: UserProfile, flags: FeatureFlags, steps: StepDef[]): string[] {
-  const has = (id: string) => steps.some(s => s.id === id);
-  if (profile.isUSRelated) return ["kyc_l1_us_relation", "us_related_blocked_screen"].filter(has);
-  if (profile.geoBlocked) return ["kyc_l1_geo", "geo_blocked_screen"].filter(has);
-  if (profile.waitlisted) return ["kyc_l1_geo", "geo_waitlisted_screen"].filter(has);
-  if (profile.age < 18) return ["kyc_l1_personal_data", "underage_blocked_screen"].filter(has);
-  if (profile.kycL3UniquenessStatus === "duplicate") return ["kyc_l3_seon_uniqueness", "duplicate_account_screen"].filter(has);
-  if (profile.kycL3FraudStatus === "failed") return ["kyc_l3_seon_fraud", "fraud_failed_screen"].filter(has);
-  if (profile.kycL3SanctionsStatus === "hit") return ["kyc_l3_seon_sanctions", "sanctions_blocked_screen"].filter(has);
-  if (profile.kycL2PoiStatus === "review") return ["kyc_l2_poi", "poi_review_pending"].filter(has);
-  if (profile.kycL3FraudStatus === "review") return ["kyc_l3_seon_fraud", "fraud_review_pending"].filter(has);
-  if (profile.amlStatus === "review") return ["aml_questionnaire", "aml_review_pending"].filter(has);
-
-  const flow: string[] = [];
-  if (flags.invite_mode) flow.push("invitation_");
-  if (flags.mobile_verification_required) flow.push("mobile_verification");
-  flow.push("kyc_l1_us_relation", "kyc_l1_geo", "kyc_l1_personal_data");
-  if (flags.poi_enabled) flow.push("kyc_l2_poi");
-  if (flags.seon_screening_enabled) flow.push("kyc_l3_seon_uniqueness", "kyc_l3_seon_fraud", "kyc_l3_seon_sanctions");
-  flow.push("username_creation", "sca_pin_setup", "sca_device_binding");
-  if (flags.biometrics_enabled && profile.deviceSupportsBiometrics) flow.push("biometric_enablement");
-  flow.push("aml_questionnaire");
-  if (flags.enhanced_aml_enabled && profile.riskLevel === "high") flow.push("enhanced_aml_questionnaire");
-  flow.push("system_configuration", "wallet_ready");
-  return flow.filter(has);
+// ─── FLOW GRAPH HELPERS ───────────────────────────────────────────────────────
+function emptyFlow(name: string, device: DeviceTarget = "mobile"): NamedFlow {
+  return { id: genId("flow"), name, description: "", device, nodes: {}, startNodeId: null, updatedAt: new Date().toISOString() };
 }
 
-function defaultProfile(): UserProfile {
-  return { country: "Germany", age: 25, isUSRelated: false, geoBlocked: false, waitlisted: false, kycL2PoiStatus: "not_started", kycL3UniquenessStatus: "not_started", kycL3FraudStatus: "not_started", kycL3SanctionsStatus: "not_started", riskLevel: "low", amlStatus: "not_started", deviceSupportsBiometrics: true };
-}
-function defaultFlags(): FeatureFlags {
-  return { invite_mode: false, poi_enabled: true, seon_screening_enabled: true, biometrics_enabled: true, enhanced_aml_enabled: true, mobile_verification_required: true };
-}
-
-function seedFlows(steps: StepDef[]): NamedFlow[] {
-  const standardProfile = defaultProfile();
-  const standardFlags = defaultFlags();
-  const inviteProfile = defaultProfile();
-  const inviteFlags = { ...defaultFlags(), invite_mode: true };
-  const highRiskProfile = { ...defaultProfile(), riskLevel: "high" as const };
-  const highRiskFlags = { ...defaultFlags(), enhanced_aml_enabled: true };
-
-  return [
-    { id: genId("flow"), name: "Standard Flow", description: "Default onboarding for regular users — mobile verification, KYC L1-L3, SCA, AML.", flags: standardFlags, profile: standardProfile, stepIds: buildFlow(standardProfile, standardFlags, steps), updatedAt: new Date().toISOString() },
-    { id: genId("flow"), name: "Invite-Only", description: "Closed beta — requires a valid invitation code before registration starts.", flags: inviteFlags, profile: inviteProfile, stepIds: buildFlow(inviteProfile, inviteFlags, steps), updatedAt: new Date().toISOString() },
-    { id: genId("flow"), name: "High-Risk Enhanced", description: "Users flagged high-risk go through the enhanced AML questionnaire.", flags: highRiskFlags, profile: highRiskProfile, stepIds: buildFlow(highRiskProfile, highRiskFlags, steps), updatedAt: new Date().toISOString() },
-  ];
+function setSlot(flow: NamedFlow, slot: FlowSlot, nodeId: string | null): NamedFlow {
+  if (slot.type === "start") return { ...flow, startNodeId: nodeId };
+  const nodes = { ...flow.nodes };
+  if (slot.type === "next") {
+    const n = nodes[slot.nodeId];
+    if (!n || n.kind !== "step") return flow;
+    nodes[slot.nodeId] = { ...n, next: nodeId };
+    return { ...flow, nodes };
+  }
+  const g = nodes[slot.gatewayId];
+  if (!g || g.kind !== "gateway") return flow;
+  const branches = g.branches.map(b => b.id === slot.branchId ? { ...b, next: nodeId } : b);
+  nodes[slot.gatewayId] = { ...g, branches };
+  return { ...flow, nodes };
 }
 
-function loadFlows(steps: StepDef[]): NamedFlow[] {
-  if (typeof window === "undefined") return seedFlows(steps);
+function collectDescendants(flow: NamedFlow, nodeId: string, acc: Set<string> = new Set()): Set<string> {
+  if (acc.has(nodeId)) return acc;
+  acc.add(nodeId);
+  const n = flow.nodes[nodeId];
+  if (!n) return acc;
+  if (n.kind === "step" && n.next) collectDescendants(flow, n.next, acc);
+  if (n.kind === "gateway") n.branches.forEach(b => { if (b.next) collectDescendants(flow, b.next as string, acc); });
+  return acc;
+}
+
+function deleteChain(flow: NamedFlow, slot: FlowSlot, nodeId: string): NamedFlow {
+  const toDelete = collectDescendants(flow, nodeId);
+  const nodes = { ...flow.nodes };
+  toDelete.forEach(id => delete nodes[id]);
+  return setSlot({ ...flow, nodes }, slot, null);
+}
+
+function addStepNode(flow: NamedFlow, slot: FlowSlot, stepId: string): NamedFlow {
+  const id = genId("node");
+  const node: FlowNode = { id, kind: "step", stepId, next: null };
+  return setSlot({ ...flow, nodes: { ...flow.nodes, [id]: node } }, slot, id);
+}
+
+function addGatewayNode(flow: NamedFlow, slot: FlowSlot, question: string): NamedFlow {
+  const id = genId("node");
+  const node: FlowNode = { id, kind: "gateway", question, branches: [{ id: genId("br"), label: "Yes", next: null }, { id: genId("br"), label: "No", next: null }] };
+  return setSlot({ ...flow, nodes: { ...flow.nodes, [id]: node } }, slot, id);
+}
+
+function updateGatewayQuestion(flow: NamedFlow, gatewayId: string, question: string): NamedFlow {
+  const g = flow.nodes[gatewayId];
+  if (!g || g.kind !== "gateway") return flow;
+  return { ...flow, nodes: { ...flow.nodes, [gatewayId]: { ...g, question } } };
+}
+
+function updateBranchLabel(flow: NamedFlow, gatewayId: string, branchId: string, label: string): NamedFlow {
+  const g = flow.nodes[gatewayId];
+  if (!g || g.kind !== "gateway") return flow;
+  const branches = g.branches.map(b => b.id === branchId ? { ...b, label } : b);
+  return { ...flow, nodes: { ...flow.nodes, [gatewayId]: { ...g, branches } } };
+}
+
+function addBranch(flow: NamedFlow, gatewayId: string): NamedFlow {
+  const g = flow.nodes[gatewayId];
+  if (!g || g.kind !== "gateway") return flow;
+  const branches = [...g.branches, { id: genId("br"), label: `Option ${g.branches.length + 1}`, next: null }];
+  return { ...flow, nodes: { ...flow.nodes, [gatewayId]: { ...g, branches } } };
+}
+
+function deleteBranch(flow: NamedFlow, gatewayId: string, branchId: string): NamedFlow {
+  const g = flow.nodes[gatewayId];
+  if (!g || g.kind !== "gateway" || g.branches.length <= 2) return flow;
+  const branch = g.branches.find(b => b.id === branchId);
+  let nf = flow;
+  if (branch?.next) nf = deleteChain(nf, { type: "branch", gatewayId, branchId }, branch.next);
+  const g2 = nf.nodes[gatewayId];
+  if (!g2 || g2.kind !== "gateway") return nf;
+  const branches = g2.branches.filter(b => b.id !== branchId);
+  return { ...nf, nodes: { ...nf.nodes, [gatewayId]: { ...g2, branches } } };
+}
+
+// Builds a simple linear (no-branch) step chain — used only to scaffold seed/demo flows.
+function linearFlow(name: string, description: string, device: DeviceTarget, stepIds: string[]): NamedFlow {
+  let flow = emptyFlow(name, device);
+  flow.description = description;
+  let slot: FlowSlot = { type: "start" };
+  for (const stepId of stepIds) {
+    flow = addStepNode(flow, slot, stepId);
+    const lastId = Object.keys(flow.nodes).find(id => flow.nodes[id].kind === "step" && (flow.nodes[id] as any).stepId === stepId && (flow.nodes[id] as any).next === null)!;
+    slot = { type: "next", nodeId: lastId };
+  }
+  return flow;
+}
+
+function seedFlows(): NamedFlow[] {
+  const standard = linearFlow(
+    "Standard Flow", "Default onboarding for regular users — mobile verification, KYC L1-L3, SCA, AML.", "mobile",
+    ["mobile_verification", "kyc_l1_geo", "kyc_l1_personal_data", "kyc_l2_poi", "username_creation", "sca_pin_setup", "sca_device_binding", "aml_questionnaire", "system_configuration", "wallet_ready"]
+  );
+
+  const invite = linearFlow(
+    "Invite-Only", "Closed beta — requires a valid invitation code before registration starts.", "mobile",
+    ["invitation_", "mobile_verification", "kyc_l1_geo", "kyc_l1_personal_data", "username_creation", "sca_pin_setup", "aml_questionnaire", "system_configuration", "wallet_ready"]
+  );
+
+  // Demonstrates a gateway: branches on US-person status before continuing.
+  let branching = linearFlow("US-Status Branching Demo", "Shows a gateway — the flow forks based on the user's answer at KYC L1.", "web",
+    ["kyc_l1_geo", "kyc_l1_personal_data"]);
+  const tailStepId = Object.keys(branching.nodes).find(id => branching.nodes[id].kind === "step" && (branching.nodes[id] as any).next === null)!;
+  branching = addGatewayNode(branching, { type: "next", nodeId: tailStepId }, "Is the user a US citizen, resident, or taxpayer?");
+  const gatewayId = Object.keys(branching.nodes).find(id => branching.nodes[id].kind === "gateway")!;
+  const gw = branching.nodes[gatewayId];
+  const yesBranch = gw.kind === "gateway" ? gw.branches[0] : null;
+  const noBranch = gw.kind === "gateway" ? gw.branches[1] : null;
+  if (yesBranch) branching = addStepNode(branching, { type: "branch", gatewayId, branchId: yesBranch.id }, "us_related_blocked_screen");
+  if (noBranch) {
+    branching = addStepNode(branching, { type: "branch", gatewayId, branchId: noBranch.id }, "kyc_l2_poi");
+    const poiNodeId = Object.keys(branching.nodes).find(id => branching.nodes[id].kind === "step" && (branching.nodes[id] as any).stepId === "kyc_l2_poi")!;
+    branching = addStepNode(branching, { type: "next", nodeId: poiNodeId }, "username_creation");
+    const userNodeId = Object.keys(branching.nodes).find(id => branching.nodes[id].kind === "step" && (branching.nodes[id] as any).stepId === "username_creation")!;
+    branching = addStepNode(branching, { type: "next", nodeId: userNodeId }, "system_configuration");
+    const sysNodeId = Object.keys(branching.nodes).find(id => branching.nodes[id].kind === "step" && (branching.nodes[id] as any).stepId === "system_configuration")!;
+    branching = addStepNode(branching, { type: "next", nodeId: sysNodeId }, "wallet_ready");
+  }
+
+  return [standard, invite, branching];
+}
+
+function loadFlows(): NamedFlow[] {
+  if (typeof window === "undefined") return seedFlows();
   try { const raw = localStorage.getItem(FLOWS_KEY); if (raw) return JSON.parse(raw); } catch {}
-  const seeded = seedFlows(steps);
+  const seeded = seedFlows();
   try { localStorage.setItem(FLOWS_KEY, JSON.stringify(seeded)); } catch {}
   return seeded;
 }
@@ -310,7 +386,7 @@ function StepRegistryTab({ steps, setSteps }: { steps: StepDef[]; setSteps: (s: 
         <table className="w-full text-xs">
           <thead><tr className="border-b border-zinc-800 bg-zinc-900/50">{["Order", "Step", "Category", "Terminal", "Mandatory", "Optional", "Actions"].map(h => <th key={h} className="text-left px-4 py-2.5 text-zinc-500 font-medium">{h}</th>)}</tr></thead>
           <tbody>
-            {filtered.map((s, i) => (
+            {filtered.map((s) => (
               <tr key={s.id} className="border-b border-zinc-800/40 hover:bg-zinc-900/40">
                 <td className="px-4 py-2.5">
                   <div className="flex flex-col gap-0.5">
@@ -343,17 +419,112 @@ function StepRegistryTab({ steps, setSteps }: { steps: StepDef[]; setSteps: (s: 
   );
 }
 
-// ─── FLOW BUILDER TAB ─────────────────────────────────────────────────────────
-const ALL_COUNTRIES = ["Germany", "France", "United Kingdom", "Netherlands", "Ireland", "Sweden", "Denmark", "Finland", "Austria", "Belgium", "Switzerland", "Poland", "Spain", "Portugal", "Italy", "United States", "Canada", "Australia", "Brazil", "India", "China", "Thailand", "Vietnam", "Ukraine", "Serbia", "Colombia", "Peru", "Tunisia", "Morocco", "Jordan", "United Arab Emirates", "Nigeria", "Pakistan", "Bangladesh", "Ethiopia", "Algeria", "Egypt", "Kenya", "Tanzania", "Ghana", "Cameroon"];
+// ─── FLOW BUILDER TAB — graph editor with sequential steps + gateway branches ──
+const DEVICE_OPTIONS: { id: DeviceTarget; label: string }[] = [
+  { id: "web", label: "Web" },
+  { id: "mobile", label: "Mobile" },
+  { id: "tablet", label: "Tablet" },
+];
+
+function StepPickerModal({ steps, onPick, onClose }: { steps: StepDef[]; onPick: (stepId: string) => void; onClose: () => void }) {
+  const [search, setSearch] = useState("");
+  const [cat, setCat] = useState("All");
+  const categories = ["All", ...Array.from(new Set(steps.map(s => s.category)))];
+  const filtered = steps.filter(s => (cat === "All" || s.category === cat) && (s.label.toLowerCase().includes(search.toLowerCase()) || s.id.includes(search.toLowerCase())));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+          <p className="text-white font-semibold text-sm">Pick a Step</p>
+          <button onClick={onClose} className="text-zinc-400 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="px-5 py-3 border-b border-zinc-800 space-y-2">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search steps…" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" />
+          <div className="flex gap-1.5 flex-wrap">
+            {categories.map(c => (
+              <button key={c} onClick={() => setCat(c)} className={`px-2.5 py-1 rounded-full text-[10px] cursor-pointer transition-colors ${cat === c ? "bg-indigo-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}>{c}</button>
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {filtered.map(s => (
+            <button key={s.id} onClick={() => onPick(s.id)} className="w-full flex items-center gap-3 text-left px-3 py-2 rounded-lg hover:bg-zinc-800 cursor-pointer transition-colors">
+              <span className="text-base">{s.icon}</span>
+              <div className="min-w-0">
+                <p className="text-white text-xs font-medium truncate">{s.label}</p>
+                <p className="text-zinc-500 text-[10px] truncate">{s.category} · {s.id}</p>
+              </div>
+            </button>
+          ))}
+          {filtered.length === 0 && <p className="text-zinc-600 text-xs text-center py-6">No matching steps</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NodeSlot({ flow, onChange, slot, nodeId, steps }: { flow: NamedFlow; onChange: (f: NamedFlow) => void; slot: FlowSlot; nodeId: string | null; steps: StepDef[] }) {
+  const [showPicker, setShowPicker] = useState(false);
+
+  if (!nodeId) {
+    return (
+      <div className="flex gap-2 py-1">
+        <button onClick={() => setShowPicker(true)} className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 border border-dashed border-indigo-500/40 rounded-lg px-2.5 py-1.5 cursor-pointer"><Plus className="w-3 h-3" /> Add Step</button>
+        <button onClick={() => onChange(addGatewayNode(flow, slot, "New decision"))} className="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 border border-dashed border-amber-500/40 rounded-lg px-2.5 py-1.5 cursor-pointer"><Plus className="w-3 h-3" /> Add Gateway</button>
+        {showPicker && <StepPickerModal steps={steps} onClose={() => setShowPicker(false)} onPick={stepId => { onChange(addStepNode(flow, slot, stepId)); setShowPicker(false); }} />}
+      </div>
+    );
+  }
+
+  const node = flow.nodes[nodeId];
+  if (!node) return null;
+
+  if (node.kind === "step") {
+    const stepDef = steps.find(s => s.id === node.stepId);
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+          <span>{stepDef?.icon ?? "❔"}</span>
+          <span className="text-white text-xs">{stepDef?.label ?? node.stepId}</span>
+          {stepDef?.isTerminal && <Badge className="text-[9px] border border-orange-500/40 text-orange-400">terminal</Badge>}
+          <button onClick={() => onChange(deleteChain(flow, slot, nodeId))} className="ml-auto text-zinc-600 hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
+        <div className="pl-4 border-l border-zinc-800 ml-2">
+          <NodeSlot flow={flow} onChange={onChange} slot={{ type: "next", nodeId }} nodeId={node.next} steps={steps} />
+        </div>
+      </div>
+    );
+  }
+
+  // gateway
+  return (
+    <div className="rounded-xl border border-amber-700/40 bg-amber-500/5 p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-amber-400 text-xs shrink-0">⑂</span>
+        <input value={node.question} onChange={e => onChange(updateGatewayQuestion(flow, node.id, e.target.value))} className="bg-transparent text-white text-xs flex-1 focus:outline-none border-b border-transparent focus:border-amber-500/50" />
+        <button onClick={() => onChange(deleteChain(flow, slot, nodeId))} className="text-zinc-600 hover:text-red-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-1">
+        {node.branches.map(b => (
+          <div key={b.id} className="border border-zinc-800 bg-zinc-950 rounded-lg p-2 min-w-[200px] shrink-0">
+            <div className="flex items-center gap-1 mb-2">
+              <input value={b.label} onChange={e => onChange(updateBranchLabel(flow, node.id, b.id, e.target.value))} className="bg-zinc-800 text-white text-[10px] px-2 py-1 rounded flex-1 focus:outline-none" />
+              {node.branches.length > 2 && <button onClick={() => onChange(deleteBranch(flow, node.id, b.id))} className="text-zinc-600 hover:text-red-400 cursor-pointer"><X className="w-3 h-3" /></button>}
+            </div>
+            <NodeSlot flow={flow} onChange={onChange} slot={{ type: "branch", gatewayId: node.id, branchId: b.id }} nodeId={b.next} steps={steps} />
+          </div>
+        ))}
+        <button onClick={() => onChange(addBranch(flow, node.id))} className="text-amber-400 hover:text-amber-300 text-[11px] cursor-pointer self-start whitespace-nowrap px-2 py-1.5">+ Branch</button>
+      </div>
+    </div>
+  );
+}
 
 function FlowEditor({ flow, steps, onSave, onRun }: { flow: NamedFlow; steps: StepDef[]; onSave: (f: NamedFlow) => void; onRun: (id: string) => void }) {
   const [draft, setDraft] = useState<NamedFlow>(flow);
-  const stepMap = Object.fromEntries(steps.map(s => [s.id, s]));
-  const computedSteps = buildFlow(draft.profile, draft.flags, steps);
-
-  const setP = (k: keyof UserProfile, v: any) => setDraft(d => ({ ...d, profile: { ...d.profile, [k]: v } }));
-  const setF = (k: keyof FeatureFlags, v: boolean) => setDraft(d => ({ ...d, flags: { ...d.flags, [k]: v } }));
-  const save = () => onSave({ ...draft, stepIds: computedSteps, updatedAt: new Date().toISOString() });
+  const save = () => onSave({ ...draft, updatedAt: new Date().toISOString() });
+  const nodeCount = Object.keys(draft.nodes).length;
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-5">
@@ -361,56 +532,21 @@ function FlowEditor({ flow, steps, onSave, onRun }: { flow: NamedFlow; steps: St
         <Field label="Flow Name" value={draft.name} onChange={v => setDraft(d => ({ ...d, name: v }))} />
         <Field label="Description" value={draft.description} onChange={v => setDraft(d => ({ ...d, description: v }))} />
       </div>
-      <div className="grid lg:grid-cols-2 gap-5">
-        <div className="space-y-3">
-          <p className="text-zinc-400 text-xs font-semibold">Simulated User Profile</p>
-          <div className="grid grid-cols-2 gap-2 bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-            <SelectField label="Country" value={draft.profile.country} onChange={v => setP("country", v)} options={ALL_COUNTRIES} />
-            <Field label="Age" type="number" value={String(draft.profile.age)} onChange={v => setP("age", Number(v) || 0)} />
-            <SelectField label="Risk Level" value={draft.profile.riskLevel} onChange={v => setP("riskLevel", v)} options={["low", "medium", "high"]} />
-            <SelectField label="POI Status" value={draft.profile.kycL2PoiStatus} onChange={v => setP("kycL2PoiStatus", v)} options={["not_started", "passed", "rejected", "review", "duplicate"]} />
-            <SelectField label="Uniqueness Status" value={draft.profile.kycL3UniquenessStatus} onChange={v => setP("kycL3UniquenessStatus", v)} options={["not_started", "passed", "duplicate"]} />
-            <SelectField label="Fraud Status" value={draft.profile.kycL3FraudStatus} onChange={v => setP("kycL3FraudStatus", v)} options={["not_started", "passed", "review", "failed"]} />
-            <SelectField label="Sanctions Status" value={draft.profile.kycL3SanctionsStatus} onChange={v => setP("kycL3SanctionsStatus", v)} options={["not_started", "passed", "hit"]} />
-            <SelectField label="AML Status" value={draft.profile.amlStatus} onChange={v => setP("amlStatus", v)} options={["not_started", "passed", "review", "rejected"]} />
-            {([["isUSRelated", "US Related"], ["geoBlocked", "Geo Blocked"], ["waitlisted", "Waitlisted"], ["deviceSupportsBiometrics", "Biometric Device"]] as const).map(([k, l]) => (
-              <label key={k} className="flex items-center gap-1.5 text-[11px] text-zinc-300 cursor-pointer col-span-1">
-                <input type="checkbox" checked={draft.profile[k] as boolean} onChange={e => setP(k, e.target.checked)} className="accent-indigo-500" />{l}
-              </label>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-3">
-          <p className="text-zinc-400 text-xs font-semibold">Feature Flags</p>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-1.5">
-            {(Object.keys(draft.flags) as (keyof FeatureFlags)[]).map(k => (
-              <label key={k} className="flex items-center gap-2 cursor-pointer text-zinc-300 text-[11px]">
-                <input type="checkbox" checked={draft.flags[k]} onChange={e => setF(k, e.target.checked)} className="accent-indigo-500" />
-                <span className="font-mono">{k}</span>
-              </label>
-            ))}
-          </div>
+      <div>
+        <label className="block text-[10px] text-zinc-500 mb-1.5">Target Device</label>
+        <div className="flex gap-1.5">
+          {DEVICE_OPTIONS.map(d => (
+            <button key={d.id} onClick={() => setDraft(p => ({ ...p, device: d.id }))} className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${draft.device === d.id ? "bg-indigo-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}>{d.label}</button>
+          ))}
         </div>
       </div>
       <div>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-zinc-400 text-xs font-semibold">Computed Steps</p>
-          <Badge className="text-[10px] border border-zinc-700 text-zinc-400">{computedSteps.length} steps</Badge>
+          <p className="text-zinc-400 text-xs font-semibold">Flow Steps</p>
+          <Badge className="text-[10px] border border-zinc-700 text-zinc-400">{nodeCount} node{nodeCount !== 1 ? "s" : ""}</Badge>
         </div>
-        <div className="space-y-1.5">
-          {computedSteps.map((id, idx) => {
-            const s = stepMap[id];
-            if (!s) return null;
-            return (
-              <div key={id} className={`flex items-center gap-3 rounded-lg px-3 py-2 border text-xs ${s.isTerminal ? (s.isBlocking ? "border-red-500/30 bg-red-500/5" : "border-orange-500/30 bg-orange-500/5") : "border-zinc-800 bg-zinc-900"}`}>
-                <div className="w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px] text-zinc-400 shrink-0">{idx + 1}</div>
-                <span>{s.icon}</span>
-                <span className="text-white">{s.label}</span>
-                {s.isOptional && <Badge className="text-[9px] border border-indigo-500/30 text-indigo-400">optional</Badge>}
-              </div>
-            );
-          })}
-        </div>
+        <p className="text-zinc-600 text-[10px] mb-3">Add steps in sequential order, or insert a gateway to branch the flow (e.g. Yes/No) into separate step chains.</p>
+        <NodeSlot flow={draft} onChange={setDraft} slot={{ type: "start" }} nodeId={draft.startNodeId} steps={steps} />
       </div>
       <div className="flex gap-2">
         <button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer">Save Flow</button>
@@ -420,12 +556,16 @@ function FlowEditor({ flow, steps, onSave, onRun }: { flow: NamedFlow; steps: St
   );
 }
 
+function flowNodeCountLabel(flow: NamedFlow): string {
+  return `${Object.keys(flow.nodes).length} node${Object.keys(flow.nodes).length !== 1 ? "s" : ""}`;
+}
+
 function FlowBuilderTab({ steps, flows, setFlows, onRunWalkthrough }: { steps: StepDef[]; flows: NamedFlow[]; setFlows: (f: NamedFlow[]) => void; onRunWalkthrough: (flowId: string) => void }) {
   const [selectedId, setSelectedId] = useState<string | null>(flows[0]?.id ?? null);
   const selectedFlow = flows.find(f => f.id === selectedId) ?? null;
 
   const newFlow = () => {
-    const nf: NamedFlow = { id: genId("flow"), name: "New Flow", description: "", flags: defaultFlags(), profile: defaultProfile(), stepIds: [], updatedAt: new Date().toISOString() };
+    const nf = emptyFlow("New Flow");
     const list = [...flows, nf];
     setFlows(list); saveFlows(list); setSelectedId(nf.id);
   };
@@ -450,7 +590,10 @@ function FlowBuilderTab({ steps, flows, setFlows, onRunWalkthrough }: { steps: S
               <p className="text-white text-xs font-medium truncate">{f.name}</p>
               <button onClick={e => { e.stopPropagation(); deleteFlow(f.id); }} className="text-zinc-600 hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100"><Trash2 className="w-3 h-3" /></button>
             </div>
-            <p className="text-zinc-500 text-[10px] mt-0.5">{f.stepIds.length} steps</p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <Badge className="text-[9px] border border-zinc-700 text-zinc-500 capitalize">{f.device}</Badge>
+              <p className="text-zinc-500 text-[10px]">{flowNodeCountLabel(f)}</p>
+            </div>
           </div>
         ))}
       </div>
@@ -464,7 +607,34 @@ function FlowBuilderTab({ steps, flows, setFlows, onRunWalkthrough }: { steps: S
 }
 
 // ─── WALKTHROUGH — realistic step screens ────────────────────────────────────
-function PhoneShell({ children }: { children: React.ReactNode }) {
+function DeviceShell({ device, children }: { device: DeviceTarget; children: React.ReactNode }) {
+  if (device === "web") {
+    return (
+      <div className="w-full max-w-xl rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl overflow-hidden">
+        <div className="h-8 bg-zinc-800 flex items-center gap-1.5 px-3 shrink-0">
+          <div className="w-2.5 h-2.5 rounded-full bg-red-500" /><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /><div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+          <div className="ml-3 flex-1 bg-zinc-950 rounded px-2 py-0.5 text-[10px] text-zinc-500 truncate">app.uth.io/onboarding</div>
+        </div>
+        <div className="h-[520px] overflow-y-auto bg-zinc-950 px-8 py-6 flex items-start justify-center">
+          <div className="w-full max-w-sm">{children}</div>
+        </div>
+      </div>
+    );
+  }
+  if (device === "tablet") {
+    return (
+      <div className="w-[440px] h-[620px] rounded-[2rem] border-4 border-zinc-700 bg-black p-3 shadow-2xl shrink-0">
+        <div className="w-full h-full rounded-[1.5rem] bg-zinc-950 overflow-hidden flex flex-col">
+          <div className="h-6 flex items-center justify-between px-6 text-[9px] text-zinc-400 shrink-0">
+            <span>9:41</span><span>Wi-Fi</span>
+          </div>
+          <div className="flex-1 overflow-y-auto px-10 pb-6 flex items-start justify-center">
+            <div className="w-full max-w-xs pt-4">{children}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="w-80 h-[600px] rounded-[2.5rem] border-4 border-zinc-700 bg-black p-2 shadow-2xl shrink-0">
       <div className="w-full h-full rounded-[2rem] bg-zinc-950 overflow-hidden flex flex-col relative">
@@ -777,21 +947,36 @@ function StepScreen({ step, onComplete }: { step: StepDef; onComplete: () => voi
   }
 }
 
+function GatewayScreen({ node, onChoose }: { node: Extract<FlowNode, { kind: "gateway" }>; onChoose: (branchId: string) => void }) {
+  return (
+    <div className="space-y-3 pt-8">
+      <div className="text-3xl text-center">⑂</div>
+      <p className="text-white text-sm font-semibold text-center px-2">{node.question}</p>
+      <div className="flex flex-col gap-2 px-2">
+        {node.branches.map(b => (
+          <button key={b.id} onClick={() => onChoose(b.id)} className="bg-zinc-800 hover:bg-indigo-600 text-white text-xs py-2.5 rounded-xl cursor-pointer transition-colors">{b.label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Walks the flow graph node-by-node. Gateway nodes pause for a live choice; the
+// chosen branch determines which downstream chain is replayed next.
 function WalkthroughRunner({ flow, flows, steps, setSelectedFlowId }: { flow: NamedFlow; flows: NamedFlow[]; steps: StepDef[]; setSelectedFlowId: (id: string) => void }) {
-  const stepMap = Object.fromEntries(steps.map(s => [s.id, s]));
-  const [idx, setIdx] = useState(0);
+  const [currentNodeId, setCurrentNodeId] = useState<string | null>(flow.startNodeId);
+  const [visited, setVisited] = useState<string[]>([]);
   const [log, setLog] = useState<string[]>([]);
 
-  const stepIds = flow.stepIds;
-  const isFinished = idx >= stepIds.length;
-  const currentStep = !isFinished ? stepMap[stepIds[idx]] : null;
+  const node = currentNodeId ? flow.nodes[currentNodeId] : null;
+  const isFinished = !node;
 
-  const handleComplete = () => {
-    if (!currentStep) return;
-    setLog(l => [...l, `[${new Date().toTimeString().slice(0, 8)}] ✓ ${currentStep.label}`]);
-    setIdx(i => i + 1);
+  const goTo = (nextId: string | null, label: string) => {
+    setLog(l => [...l, `[${new Date().toTimeString().slice(0, 8)}] ✓ ${label}`]);
+    if (currentNodeId) setVisited(v => [...v, currentNodeId]);
+    setCurrentNodeId(nextId);
   };
-  const reset = () => { setIdx(0); setLog([]); };
+  const reset = () => { setCurrentNodeId(flow.startNodeId); setVisited([]); setLog([]); };
 
   return (
     <div className="flex h-[calc(100vh-180px)]">
@@ -803,34 +988,53 @@ function WalkthroughRunner({ flow, flows, steps, setSelectedFlowId }: { flow: Na
           </select>
         </div>
         <p className="text-zinc-500 text-[10px]">{flow.description}</p>
-        <div className="flex items-center justify-between">
-          <p className="text-zinc-400 text-xs font-semibold">Progress</p>
+        <Badge className="text-[9px] border border-zinc-700 text-zinc-500 capitalize">{flow.device}</Badge>
+        <div className="flex items-center justify-between pt-1">
+          <p className="text-zinc-400 text-xs font-semibold">Visited Steps</p>
           <button onClick={reset} className="text-zinc-500 hover:text-white cursor-pointer"><RefreshCw className="w-3.5 h-3.5" /></button>
         </div>
         <div className="space-y-1">
-          {stepIds.map((id, i) => {
-            const s = stepMap[id];
+          {visited.length === 0 && <p className="text-zinc-700 text-[11px]">Nothing visited yet</p>}
+          {visited.map((id, i) => {
+            const n = flow.nodes[id];
+            const label = n?.kind === "step" ? steps.find(s => s.id === n.stepId)?.label ?? n.stepId : n?.kind === "gateway" ? n.question : id;
             return (
-              <div key={id} className={`flex items-center gap-2 rounded-lg px-2 py-1 text-[11px] ${i === idx ? "bg-indigo-500/10 border border-indigo-500/30" : ""}`}>
-                {i < idx ? <CheckCircle className="w-3 h-3 text-green-400 shrink-0" /> : i === idx ? <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse shrink-0" /> : <div className="w-2 h-2 rounded-full border border-zinc-700 shrink-0" />}
-                <span className={i < idx ? "text-green-400" : i === idx ? "text-white" : "text-zinc-600"}>{s?.label}</span>
+              <div key={id + i} className="flex items-center gap-2 rounded-lg px-2 py-1 text-[11px]">
+                <CheckCircle className="w-3 h-3 text-green-400 shrink-0" />
+                <span className="text-green-400 truncate">{label}</span>
               </div>
             );
           })}
+          {node && (
+            <div className="flex items-center gap-2 rounded-lg px-2 py-1 text-[11px] bg-indigo-500/10 border border-indigo-500/30">
+              <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse shrink-0" />
+              <span className="text-white truncate">{node.kind === "step" ? (steps.find(s => s.id === node.stepId)?.label ?? node.stepId) : node.question}</span>
+            </div>
+          )}
         </div>
       </div>
       <div className="flex-1 overflow-auto p-6 flex items-center justify-center">
-        <PhoneShell>
+        <DeviceShell device={flow.device}>
           {isFinished ? (
             <div className="space-y-3 pt-10 text-center">
               <CheckCircle className="w-10 h-10 text-green-400 mx-auto" />
               <p className="text-white text-sm font-semibold">Walkthrough complete</p>
               <button onClick={reset} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-2 rounded-lg cursor-pointer">Restart</button>
             </div>
-          ) : currentStep ? (
-            <StepScreen key={currentStep.id + idx} step={currentStep} onComplete={handleComplete} />
+          ) : node?.kind === "step" ? (
+            (() => {
+              const stepDef = steps.find(s => s.id === node.stepId);
+              return stepDef ? <StepScreen key={node.id} step={stepDef} onComplete={() => goTo(node.next, stepDef.label)} /> : (
+                <div className="pt-10 text-center text-zinc-500 text-xs">Step &ldquo;{node.stepId}&rdquo; no longer exists in the registry.</div>
+              );
+            })()
+          ) : node?.kind === "gateway" ? (
+            <GatewayScreen key={node.id} node={node} onChoose={branchId => {
+              const b = node.branches.find(x => x.id === branchId);
+              goTo(b?.next ?? null, `${node.question} → ${b?.label ?? branchId}`);
+            }} />
           ) : null}
-        </PhoneShell>
+        </DeviceShell>
       </div>
       <div className="w-56 border-l border-zinc-800 overflow-auto p-4 flex-shrink-0">
         <p className="text-zinc-400 text-xs font-semibold mb-2">Event Log</p>
@@ -855,8 +1059,8 @@ export default function OnboardingPage() {
   const [user, setUser] = useState<any>(null);
   const [tab, setTab] = useState<"registry" | "builder" | "walkthrough">("builder");
   const [steps, setSteps] = useState<StepDef[]>(() => loadSteps());
-  const [flows, setFlows] = useState<NamedFlow[]>(() => loadFlows(loadSteps()));
-  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(() => loadFlows(loadSteps())[0]?.id ?? null);
+  const [flows, setFlows] = useState<NamedFlow[]>(() => loadFlows());
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(() => flows[0]?.id ?? null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
