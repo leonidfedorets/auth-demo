@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Building2, ChevronRight, Plus, Search, Trash2, Edit, X,
@@ -8,48 +8,7 @@ import {
   ChevronLeft, Copy, Check, RefreshCw
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-
-function DashNav({ user, currentPath }: { user: any; currentPath: string }) {
-  const [showMenu, setShowMenu] = useState(false);
-  const NAV_ITEMS = [
-    { href: "/dashboard", label: "Overview" },
-    { href: "/dashboard/transactions", label: "Transactions" },
-    { href: "/dashboard/clients", label: "Clients" },
-    { href: "/dashboard/devices", label: "Devices" },
-    { href: "/dashboard/sessions", label: "Sessions" },
-    { href: "/dashboard/audit", label: "Audit Log" },
-    { href: "/dashboard/kyb", label: "KYB" },
-    { href: "/dashboard/onboarding", label: "Onboarding" },
-    { href: "/dashboard/risk-rules", label: "Risk Rules" },
-    { href: "/dashboard/settings", label: "Settings" },
-  ];
-  return (
-    <nav className="border-b border-zinc-800 px-4 py-0 flex items-center bg-zinc-950 sticky top-0 z-40 h-11">
-      <Link href="/" className="flex items-center gap-1.5 mr-5 shrink-0">
-        <div className="w-5 h-5 rounded bg-indigo-600 flex items-center justify-center"><span className="font-black text-white text-[9px]">UTH</span></div>
-        <span className="font-black text-sm tracking-tighter hidden sm:block"><span className="text-indigo-400">U</span><span className="text-indigo-300">T</span><span className="text-indigo-200">H</span></span>
-      </Link>
-      <div className="flex items-center gap-0.5 overflow-x-auto flex-1">
-        {NAV_ITEMS.map(item => (
-          <Link key={item.href} href={item.href} className={`px-3 py-2.5 text-xs whitespace-nowrap transition-colors border-b-2 -mb-px ${currentPath === item.href ? "border-indigo-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>
-            {item.label}
-          </Link>
-        ))}
-      </div>
-      <div className="relative ml-3 shrink-0">
-        <button onClick={() => setShowMenu(!showMenu)} className="flex items-center gap-2 text-xs text-zinc-400 hover:text-white cursor-pointer">
-          <div className="w-7 h-7 rounded-full bg-indigo-700 flex items-center justify-center text-white font-bold text-xs">{user?.email?.[0]?.toUpperCase() || "?"}</div>
-        </button>
-        {showMenu && (
-          <div className="absolute right-0 top-9 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-48 z-50 py-1">
-            <div className="px-3 py-2 border-b border-zinc-800"><p className="text-white text-xs font-semibold truncate">{user?.email}</p></div>
-            <button onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }} className="w-full text-left px-3 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 text-xs cursor-pointer">Sign out</button>
-          </div>
-        )}
-      </div>
-    </nav>
-  );
-}
+import { DashNav } from "@/components/dash-nav";
 
 // ── Reference dictionaries ───────────────────────────────────────────────────
 const COUNTRY_RISK: Record<string, "Low" | "Medium" | "High" | "Prohibited"> = {
@@ -364,7 +323,6 @@ const WIZARD_STEPS = ["Basic Info", "Activity & Compliance", "Risk Factors", "Sc
 
 export default function KYBPage() {
   const router = useRouter();
-  const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
   const [data, setData] = useState<KybData>(() => loadData());
   const [activeTab, setActiveTab] = useState("clients");
@@ -402,7 +360,7 @@ export default function KYBPage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
-      <DashNav user={user} currentPath={pathname} />
+      <DashNav user={user} />
       <div className="max-w-screen-xl mx-auto px-4 sm:px-6 py-6 space-y-5">
         <div>
           <div className="flex items-center gap-2 mb-1">

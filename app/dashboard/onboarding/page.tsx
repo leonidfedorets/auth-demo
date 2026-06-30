@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Workflow, CheckCircle, Play,
@@ -8,6 +8,7 @@ import {
   Plus, Trash2, Edit, X, Smartphone, ShieldCheck, Fingerprint,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DashNav } from "@/components/dash-nav";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface StepDef {
@@ -234,49 +235,6 @@ function loadFlows(): NamedFlow[] {
   return seeded;
 }
 function saveFlows(flows: NamedFlow[]) { try { localStorage.setItem(FLOWS_KEY, JSON.stringify(flows)); } catch {} }
-
-// ─── NAV ─────────────────────────────────────────────────────────────────────
-function DashNav({ user }: { user: any }) {
-  const pathname = usePathname();
-  const [menu, setMenu] = useState(false);
-  const NAV = [
-    { href: "/dashboard", label: "Overview" },
-    { href: "/dashboard/transactions", label: "Transactions" },
-    { href: "/dashboard/clients", label: "Clients" },
-    { href: "/dashboard/devices", label: "Devices" },
-    { href: "/dashboard/sessions", label: "Sessions" },
-    { href: "/dashboard/audit", label: "Audit Log" },
-    { href: "/dashboard/kyb", label: "KYB" },
-    { href: "/dashboard/onboarding", label: "Onboarding" },
-    { href: "/dashboard/risk-rules", label: "Risk Rules" },
-    { href: "/dashboard/settings", label: "Settings" },
-  ];
-  return (
-    <nav className="border-b border-zinc-800 px-4 py-0 flex items-center bg-zinc-950 sticky top-0 z-40 h-11">
-      <Link href="/" className="flex items-center gap-1.5 mr-5 shrink-0">
-        <div className="w-5 h-5 rounded bg-indigo-600 flex items-center justify-center"><span className="font-black text-white text-[9px]">UTH</span></div>
-        <span className="font-black text-sm tracking-tighter hidden sm:block"><span className="text-indigo-400">U</span><span className="text-indigo-300">T</span><span className="text-indigo-200">H</span></span>
-      </Link>
-      <div className="flex items-center gap-0.5 overflow-x-auto flex-1">
-        {NAV.map(item => (
-          <Link key={item.href} href={item.href} className={`px-3 py-2.5 text-xs whitespace-nowrap transition-colors border-b-2 -mb-px ${pathname === item.href ? "border-indigo-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>
-            {item.label}
-          </Link>
-        ))}
-      </div>
-      <div className="relative ml-3 shrink-0">
-        <button onClick={() => setMenu(!menu)} className="flex items-center gap-2 text-xs text-zinc-400 hover:text-white cursor-pointer">
-          <div className="w-7 h-7 rounded-full bg-indigo-700 flex items-center justify-center text-white font-bold text-xs">{user?.email?.[0]?.toUpperCase() || "?"}</div>
-        </button>
-        {menu && (
-          <div className="absolute right-0 top-9 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-44 z-50 py-1">
-            <button onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }} className="w-full text-left px-3 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 text-xs cursor-pointer">Sign out</button>
-          </div>
-        )}
-      </div>
-    </nav>
-  );
-}
 
 function Field({ label, value, onChange, type = "text", className = "" }: { label: string; value: string; onChange: (v: string) => void; type?: string; className?: string }) {
   return (

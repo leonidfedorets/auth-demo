@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import Link from "next/link";
-import { CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CheckCircle, XCircle, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DashNav } from "@/components/dash-nav";
 
 interface AuditLog {
   id: string;
@@ -48,57 +48,15 @@ function detailsText(d: AuditLog["details"]): string {
   return JSON.stringify(d).slice(0, 120);
 }
 
-function DashNav({ user, currentPath }: { user: any; currentPath: string }) {
-  const [showMenu, setShowMenu] = useState(false);
-  const NAV_ITEMS = [
-    { href: "/dashboard", label: "Overview" },
-    { href: "/dashboard/transactions", label: "Transactions" },
-    { href: "/dashboard/clients", label: "Clients" },
-    { href: "/dashboard/devices", label: "Devices" },
-    { href: "/dashboard/sessions", label: "Sessions" },
-    { href: "/dashboard/audit", label: "Audit Log" },
-    { href: "/dashboard/risk-rules", label: "Risk Rules" },
-    { href: "/dashboard/settings", label: "Settings" },
-  ];
-  return (
-    <nav className="border-b border-zinc-800 px-4 py-0 flex items-center bg-zinc-950 sticky top-0 z-40 h-11">
-      <Link href="/" className="flex items-center gap-1.5 mr-5 shrink-0">
-        <div className="w-5 h-5 rounded bg-indigo-600 flex items-center justify-center"><span className="font-black text-white text-[9px]">UTH</span></div>
-        <span className="font-black text-sm tracking-tighter hidden sm:block"><span className="text-indigo-400">U</span><span className="text-indigo-300">T</span><span className="text-indigo-200">H</span></span>
-      </Link>
-      <div className="flex items-center gap-0.5 overflow-x-auto flex-1">
-        {NAV_ITEMS.map(item => (
-          <Link key={item.href} href={item.href} className={`px-3 py-2.5 text-xs whitespace-nowrap transition-colors border-b-2 -mb-px ${currentPath === item.href ? "border-indigo-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>
-            {item.label}
-          </Link>
-        ))}
-      </div>
-      <div className="relative ml-3 shrink-0">
-        <button onClick={() => setShowMenu(!showMenu)} className="flex items-center gap-2 text-xs text-zinc-400 hover:text-white cursor-pointer">
-          <div className="w-7 h-7 rounded-full bg-indigo-700 flex items-center justify-center text-white font-bold text-xs">{user?.email?.[0]?.toUpperCase() || "?"}</div>
-          <span className="hidden sm:block max-w-[120px] truncate">{user?.email}</span>
-        </button>
-        {showMenu && (
-          <div className="absolute right-0 top-9 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-48 z-50 py-1">
-            <div className="px-3 py-2 border-b border-zinc-800"><p className="text-white text-xs font-semibold truncate">{user?.email}</p></div>
-            <Link href="/dashboard" onClick={() => setShowMenu(false)} className="block px-3 py-2 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs">Dashboard</Link>
-            <Link href="/dashboard/settings" onClick={() => setShowMenu(false)} className="block px-3 py-2 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs">Settings</Link>
-            <button onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = "/login"; }} className="w-full text-left px-3 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 text-xs border-t border-zinc-800 cursor-pointer">Sign out</button>
-          </div>
-        )}
-      </div>
-    </nav>
-  );
-}
 
 export default function AuditPage() {
   const router = useRouter();
-  const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [todayCount, setTodayCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -125,7 +83,7 @@ export default function AuditPage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
-      <DashNav user={user} currentPath={pathname} />
+      <DashNav user={user} />
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
         <div className="flex items-center justify-between mb-5">
@@ -163,24 +121,62 @@ export default function AuditPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(evt => (
-                    <tr key={evt.id} className="border-b border-zinc-800/50 last:border-0 hover:bg-zinc-800/20 transition-colors">
-                      <td className="px-3 py-2.5 text-zinc-500 whitespace-nowrap font-mono">{timeAgo(evt.created_at)}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <Badge variant="outline" className={`text-[10px] ${actionBadgeClass(evt.action)}`}>{evt.action.replace(/\./g, " ")}</Badge>
-                      </td>
-                      <td className="px-3 py-2.5 text-zinc-300 whitespace-nowrap">
-                        {evt.client_email ?? <span className="text-zinc-600">system</span>}
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-zinc-400">{evt.ip_address || "—"}</td>
-                      <td className="px-3 py-2.5 text-zinc-400 max-w-[200px] truncate" title={detailsText(evt.details)}>{detailsText(evt.details)}</td>
-                      <td className="px-3 py-2.5">
-                        {evt.outcome === "failure" || evt.outcome === "failed"
-                          ? <XCircle className="w-3.5 h-3.5 text-red-400" />
-                          : <CheckCircle className="w-3.5 h-3.5 text-green-400" />}
-                      </td>
-                    </tr>
-                  ))}
+                  {filtered.map(evt => {
+                    const isOpen = expanded === evt.id;
+                    const rawDetails = (() => {
+                      if (!evt.details) return null;
+                      if (typeof evt.details === "string") { try { return JSON.parse(evt.details); } catch { return evt.details; } }
+                      return evt.details;
+                    })();
+                    return (
+                      <>
+                        <tr
+                          key={evt.id}
+                          onClick={() => setExpanded(isOpen ? null : evt.id)}
+                          className="border-b border-zinc-800/50 hover:bg-zinc-800/20 transition-colors cursor-pointer"
+                        >
+                          <td className="px-3 py-2.5 text-zinc-500 whitespace-nowrap font-mono">{timeAgo(evt.created_at)}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <Badge variant="outline" className={`text-[10px] ${actionBadgeClass(evt.action)}`}>{evt.action.replace(/\./g, " ")}</Badge>
+                          </td>
+                          <td className="px-3 py-2.5 text-zinc-300 whitespace-nowrap">
+                            {evt.client_email ?? <span className="text-zinc-600">system</span>}
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-zinc-400">{evt.ip_address || "—"}</td>
+                          <td className="px-3 py-2.5 text-zinc-400 max-w-[200px] truncate">{detailsText(evt.details)}</td>
+                          <td className="px-3 py-2.5">
+                            {evt.outcome === "failure" || evt.outcome === "failed"
+                              ? <XCircle className="w-3.5 h-3.5 text-red-400" />
+                              : <CheckCircle className="w-3.5 h-3.5 text-green-400" />}
+                          </td>
+                          <td className="px-3 py-2.5 text-zinc-600">
+                            {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                          </td>
+                        </tr>
+                        {isOpen && (
+                          <tr key={`${evt.id}-detail`} className="bg-zinc-900/60 border-b border-zinc-800/50">
+                            <td colSpan={7} className="px-4 py-3">
+                              <div className="grid grid-cols-2 gap-3 text-xs mb-2">
+                                <div><span className="text-zinc-500">Event ID: </span><span className="font-mono text-zinc-400">{evt.id}</span></div>
+                                <div><span className="text-zinc-500">Time: </span><span className="text-zinc-400">{new Date(evt.created_at).toLocaleString()}</span></div>
+                                {evt.risk_score != null && <div><span className="text-zinc-500">Risk score: </span><span className="font-mono text-yellow-400">{evt.risk_score}</span></div>}
+                                {evt.user_agent && <div className="col-span-2"><span className="text-zinc-500">UA: </span><span className="text-zinc-400 break-all">{evt.user_agent}</span></div>}
+                                {evt.client_id && <div><span className="text-zinc-500">Client ID: </span><span className="font-mono text-indigo-300 text-[10px]">{evt.client_id}</span></div>}
+                              </div>
+                              {rawDetails && (
+                                <div>
+                                  <p className="text-zinc-500 text-[10px] uppercase tracking-wide mb-1">Full payload</p>
+                                  <pre className="bg-zinc-950 rounded-lg p-2.5 text-[10px] font-mono text-zinc-400 overflow-auto max-h-48 border border-zinc-800">
+                                    {JSON.stringify(rawDetails, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

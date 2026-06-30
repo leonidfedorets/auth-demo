@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Settings, Save, Clock, Shield, Smartphone, Activity, Key, RefreshCw, Eye, EyeOff, Copy, KeyRound, LayoutGrid, Plus, Trash2, Edit2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,15 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-
-function DashNav({ user }: { user: any }) {
-  return (<nav className="border-b border-zinc-800 px-6 py-3 flex items-center gap-4 bg-zinc-950 sticky top-0 z-40">
-    <Link href="/" className="flex items-center gap-2"><div className="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center"><span className="font-black text-white text-[10px]">UTH</span></div><span className="font-black text-sm tracking-tighter"><span className="text-indigo-400">U</span><span className="text-indigo-300">T</span><span className="text-indigo-200">H</span></span></Link>
-    <span className="text-zinc-600">/</span><Link href="/dashboard" className="text-zinc-500 hover:text-white text-sm">Dashboard</Link>
-    <span className="text-zinc-600">/</span><span className="text-zinc-400 text-sm">Tenant Settings</span>
-    <div className="ml-auto text-xs text-zinc-500">{user?.email}</div>
-  </nav>);
-}
+import { DashNav } from "@/components/dash-nav";
 
 const ALL_CLAIMS = ["sub","email","tid","sid","did","dfp","amr","acr","risk","risk_lvl","sca","sca_method","sca_ts","ttype","roles","iat","exp","iss"];
 const CLAIM_DESCRIPTIONS: Record<string,string> = { sub:"User ID",email:"Email address",tid:"Tenant ID",sid:"Session ID",did:"Device ID",dfp:"Device fingerprint",amr:"Auth methods ref",acr:"Auth context ref",risk:"Risk score (0–100)",risk_lvl:"Risk level (low/medium/high/critical)",sca:"SCA completed",sca_method:"SCA method used",sca_ts:"SCA timestamp",ttype:"Token type (access/refresh)",roles:"User roles",iat:"Issued at",exp:"Expiry",iss:"Issuer" };
