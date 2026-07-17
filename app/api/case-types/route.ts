@@ -22,16 +22,11 @@ export async function GET(req: NextRequest) {
     const types = await sql`SELECT * FROM case_types ORDER BY name`;
     const fields = await sql`SELECT * FROM case_type_fields ORDER BY case_type_id, sort_order`;
 
-    const result = types.rows.map(t => ({
-      id: t.id,
-      name: t.name,
-      department: t.department,
-      approvalRequired: t.approval_required,
-      triggerType: t.trigger_type,
-      version: t.version,
-      active: t.active,
-      fields: fields.rows
+    const result = types.rows.map(t => {
+      const seen = new Set<string>();
+      const deduped = fields.rows
         .filter(f => f.case_type_id === t.id)
+        .filter(f => { if (seen.has(f.field_key)) return false; seen.add(f.field_key); return true; })
         .map(f => ({
           key: f.field_key,
           label: f.label,
@@ -40,8 +35,13 @@ export async function GET(req: NextRequest) {
           options: f.options ?? [],
           active: f.active,
           conditionalOn: f.conditional_on ?? undefined,
-        })),
-    }));
+        }));
+      return {
+        id: t.id, name: t.name, department: t.department,
+        approvalRequired: t.approval_required, triggerType: t.trigger_type,
+        version: t.version, active: t.active, fields: deduped,
+      };
+    });
 
     return NextResponse.json({ caseTypes: result });
   } catch (e) {
