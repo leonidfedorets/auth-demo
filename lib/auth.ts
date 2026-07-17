@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import { verifyToken, type AuthClaims } from "./jwt";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 export async function getCurrentUser(): Promise<AuthClaims | null> {
   const cookieStore = await cookies();
@@ -23,17 +25,14 @@ export function getClientIP(req: Request): string {
 }
 
 export function hashPassword(password: string): Promise<string> {
-  const bcrypt = require("bcryptjs");
   return bcrypt.hash(password, 12);
 }
 
 export function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const bcrypt = require("bcryptjs");
   return bcrypt.compare(password, hash);
 }
 
 export function hashToken(token: string): string {
-  const crypto = require("crypto");
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 

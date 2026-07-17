@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@vercel/postgres";
+import crypto from "crypto";
 import { signAccessToken, signRefreshToken, signSCAChallengeToken, accessTTLSeconds, refreshTTLSeconds } from "@/lib/jwt";
 import { verifyPassword, hashToken, generateId, getClientIP } from "@/lib/auth";
 import { cacheSession, loginRateLimit, incrementFailedLogins, resetFailedLogins, redis } from "@/lib/redis";
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest) {
     if (method === "email_otp") {
       // Generate a 6-digit code (in production: send via email)
       const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const codeHash = require("crypto").createHash("sha256").update(code).digest("hex");
+      const codeHash = crypto.createHash("sha256").update(code).digest("hex");
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
       await sql`INSERT INTO sca_challenges (user_id, method, code_hash, expires_at) VALUES (${user.id}, 'email_otp', ${codeHash}, ${expiresAt})`;
       // SCA code issued — deliver via configured channel (email/SMS/push)
