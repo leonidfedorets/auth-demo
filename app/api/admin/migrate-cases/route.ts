@@ -44,6 +44,17 @@ export async function POST(req: NextRequest) {
       )
     `;
     await sql`CREATE INDEX IF NOT EXISTS idx_ctf_type ON case_type_fields(case_type_id)`;
+    // Remove duplicate field rows, keeping only the earliest inserted per (case_type_id, field_key)
+    await sql`
+      DELETE FROM case_type_fields
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (PARTITION BY case_type_id, field_key ORDER BY sort_order, id) AS rn
+          FROM case_type_fields
+        ) sub WHERE rn > 1
+      )
+    `;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_ctf_unique ON case_type_fields(case_type_id, field_key)`;
     results.push("case_type_fields: ok");
   } catch (e) { results.push(`case_type_fields: ${e}`); }
 
@@ -292,7 +303,7 @@ export async function POST(req: NextRequest) {
       await sql`
         INSERT INTO case_type_fields (case_type_id, field_key, label, field_type, required_at, options, sort_order, conditional_on)
         VALUES (${f.case_type_id}, ${f.field_key}, ${f.label}, ${f.field_type}, ${f.required_at}, ${JSON.stringify(f.options)}, ${f.sort_order}, ${f.conditional_on})
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (case_type_id, field_key) DO NOTHING
       `;
     } catch (e) { results.push(`seed field ${f.field_key}: ${e}`); }
   }
