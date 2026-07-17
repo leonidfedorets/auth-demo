@@ -12,6 +12,6 @@ export default function ChangelogPage() {
       <div className="mb-12"><div className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Product</div><h1 className="text-4xl font-black text-white mb-3">Changelog</h1><p className="text-zinc-400">What's new in UTH.</p></div>
       <div className="space-y-8">{RELEASES.map(r => (<div key={r.version} className="relative pl-5 border-l border-zinc-800"><div className="absolute -left-1.5 top-1 w-3 h-3 rounded-full bg-indigo-600" /><div className="flex items-center gap-2.5 mb-2"><span className="text-white font-bold">v{r.version}</span>{r.badge && <span className="text-xs bg-indigo-600 text-white px-2 py-0.5 rounded">{r.badge}</span>}<span className="text-zinc-500 text-sm">{r.date}</span></div><ul className="space-y-1">{r.items.map(i => (<li key={i} className="text-zinc-400 text-sm before:content-['—'] before:mr-2 before:text-zinc-600">{i}</li>))}</ul></div>))}</div>
     </div>
-    <footer className="border-t border-white/8 px-6 py-6 text-center text-zinc-600 text-xs">© 2025 Empatixtech. <Link href="/" className="hover:text-zinc-400 ml-1">← Back to UTH</Link></footer>
+    <footer className="border-t border-white/8 px-6 py-6 text-center text-zinc-600 text-xs">© UTH Demo · <Link href="/" className="hover:text-zinc-400 ml-1">← Back to UTH</Link></footer>
   </div>);
 }

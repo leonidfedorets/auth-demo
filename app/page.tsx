@@ -3,8 +3,7 @@ import {
   Shield, Lock, Smartphone, Activity, Key, Globe, ArrowRight,
   CheckCircle2, ChevronRight, Server, Layers, BarChart3,
   Fingerprint, Cpu, FileCheck, Users, Building2, Zap,
-  ShieldCheck, AlertTriangle, CreditCard, Banknote, Phone,
-  Mail, MapPin, MessageSquare
+  ShieldCheck, AlertTriangle, CreditCard, Banknote, MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -129,7 +128,7 @@ export default function LandingPage() {
       <section className="max-w-6xl mx-auto px-6 pt-24 pb-20 text-center">
         <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-xs text-indigo-300 mb-8">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-          By Empatix · Riga, Latvia · PCI DSS v4.0 certified
+          PCI DSS v4.0 certified · Demo
         </div>
         <h1 className="text-6xl font-black tracking-tight mb-6 leading-[1.08]">
           Stop building auth.<br />
@@ -179,7 +178,7 @@ export default function LandingPage() {
             <Badge variant="outline" className="border-zinc-700 text-zinc-400 text-xs mb-4">What is UTH?</Badge>
             <h2 className="text-4xl font-black text-white mb-5">Authentication as a service — the right way.</h2>
             <p className="text-zinc-400 text-lg leading-relaxed mb-6">
-              UTH (Unified Token Hub) is a complete authentication backend built by <a href="https://empatixtech.com" target="_blank" className="text-indigo-400 hover:underline">Empatix</a>. It handles every aspect of your auth layer so your engineering team can focus on business logic.
+              UTH (Unified Token Hub) is a complete authentication backend. It handles every aspect of your auth layer so your engineering team can focus on business logic.
             </p>
             <p className="text-zinc-400 leading-relaxed mb-6">
               Unlike generic auth providers, UTH was designed from the ground up for regulated industries — fintech, banking, healthcare, and enterprise SaaS — where compliance is not optional and security incidents are not acceptable.
@@ -205,7 +204,7 @@ export default function LandingPage() {
             </div>
             <pre className="text-sm text-zinc-300 font-mono leading-relaxed overflow-auto">{`// One call. Everything handled.
 const res = await fetch(
-  "https://api.uth.empatixtech.com/v1/auth/login",
+  "https://api.uth.example.com/v1/auth/login",
   {
     method: "POST",
     headers: {
@@ -424,17 +423,7 @@ const {
               </div>
               <UthLogo size="sm" />
             </div>
-            <p className="text-zinc-500 text-xs leading-relaxed mb-4">Authentication infrastructure for production teams. Built by Empatix.</p>
-            <div className="space-y-2 text-xs text-zinc-500">
-              <div className="flex items-start gap-2"><MapPin className="w-3 h-3 mt-0.5 shrink-0 text-zinc-600" />Pērnavas iela 21–22, Rīga, LV-1009, Latvia</div>
-              <div className="flex items-center gap-2"><Phone className="w-3 h-3 shrink-0 text-zinc-600" /><a href="tel:+37124965140" className="hover:text-zinc-300 transition-colors">+371 24965 140</a></div>
-              <div className="flex items-center gap-2"><Mail className="w-3 h-3 shrink-0 text-zinc-600" /><a href="mailto:sales@empatixtech.com" className="hover:text-zinc-300 transition-colors">sales@empatixtech.com</a></div>
-            </div>
-            <div className="flex items-center gap-3 mt-4">
-              <a href="https://t.me/empatixtech" target="_blank" className="text-zinc-600 hover:text-indigo-400 transition-colors text-xs">Telegram</a>
-              <a href="https://wa.me/37124965140" target="_blank" className="text-zinc-600 hover:text-indigo-400 transition-colors text-xs">WhatsApp</a>
-              <a href="https://linkedin.com/company/empatix" target="_blank" className="text-zinc-600 hover:text-indigo-400 transition-colors text-xs">LinkedIn</a>
-            </div>
+            <p className="text-zinc-500 text-xs leading-relaxed mb-4">Authentication infrastructure for production teams.</p>
           </div>
           {[
             { heading: "Platform", links: [["Sessions & JWT", "/platform/sessions"], ["WebAuthn / Passkeys", "/platform/passkeys"], ["Device Attestation", "/platform/device-attestation"], ["Risk Engine", "/platform/risk-engine"], ["Engine Risk", "/platform/engine-risk"], ["SCA / PSD2", "/platform/sca"]] },
@@ -452,8 +441,7 @@ const {
           ))}
         </div>
         <div className="border-t border-white/8 px-6 py-5 max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <p className="text-zinc-600 text-xs">© 2025 Empatix. All rights reserved. UTH is a product of Empatix (Empatixtech SIA).</p>
-          <a href="https://empatixtech.com" target="_blank" className="text-zinc-700 hover:text-zinc-500 text-xs transition-colors">empatixtech.com</a>
+          <p className="text-zinc-700 text-xs">UTH — Authentication Infrastructure · Demo build</p>
         </div>
       </footer>
     </div>

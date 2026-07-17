@@ -11,6 +11,8 @@ const NAV_ITEMS = [
   { href: "/dashboard/sessions", label: "Sessions" },
   { href: "/dashboard/audit", label: "Audit Log" },
   { href: "/dashboard/kyb", label: "KYB" },
+  { href: "/dashboard/cdd", label: "CDD" },
+  { href: "/dashboard/cases", label: "Cases" },
   { href: "/dashboard/onboarding", label: "Onboarding" },
   { href: "/dashboard/risk-rules", label: "Risk Rules" },
   { href: "/dashboard/settings", label: "Settings" },

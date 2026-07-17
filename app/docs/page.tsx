@@ -76,8 +76,8 @@ curl -b cookies.txt -X POST https://auth-demo-rouge.vercel.app/api/risk/evaluate
         </details>))}</div>
       </div>))}</div>
 
-      <div className="mt-12 rounded-xl border border-indigo-500/30 bg-indigo-600/5 p-6 text-center"><BookOpen className="w-8 h-8 text-indigo-400 mx-auto mb-3"/><p className="text-white font-semibold mb-1">Need an API key or SDK?</p><p className="text-zinc-400 text-sm">Contact <a href="mailto:sales@empatixtech.com" className="text-indigo-400 hover:underline">sales@empatixtech.com</a> or <Link href="/onboarding" className="text-indigo-400 hover:underline">start your free trial</Link>.</p></div>
+      <div className="mt-12 rounded-xl border border-indigo-500/30 bg-indigo-600/5 p-6 text-center"><BookOpen className="w-8 h-8 text-indigo-400 mx-auto mb-3"/><p className="text-white font-semibold mb-1">Need an API key or SDK?</p><p className="text-zinc-400 text-sm">Visit <Link href="/onboarding" className="text-indigo-400 hover:underline">start your free trial</Link>.</p></div>
     </div>
-    <footer className="border-t border-zinc-800 px-6 py-6 text-center text-zinc-600 text-xs">© 2025 Empatixtech.</footer>
+    <footer className="border-t border-zinc-800 px-6 py-6 text-center text-zinc-600 text-xs">UTH Demo</footer>
   </div>);
 }

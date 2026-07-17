@@ -10,8 +10,8 @@ const COOKIE_TYPES = [
 ];
 export default function CookiesPage() {
   return (<div className="min-h-screen bg-zinc-950 text-white"><Nav /><div className="max-w-3xl mx-auto px-6 py-16">
-    <div className="mb-12"><div className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Legal · Empatixtech</div><h1 className="text-4xl font-black text-white mb-3">Cookie Policy</h1><p className="text-zinc-500 text-sm">Last updated: 01 April 2025</p></div>
-    <p className="text-zinc-400 leading-relaxed mb-10">This Cookie Policy explains how Empatixtech and the UTH platform use cookies and similar tracking technologies. By using our website or the UTH platform, you consent to our use of cookies as described in this policy.</p>
+    <div className="mb-12"><div className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Legal · UTH</div><h1 className="text-4xl font-black text-white mb-3">Cookie Policy</h1><p className="text-zinc-500 text-sm">Last updated: 01 April 2025</p></div>
+    <p className="text-zinc-400 leading-relaxed mb-10">This Cookie Policy explains how the UTH platform uses cookies and similar tracking technologies. By using the UTH platform, you consent to our use of cookies as described in this policy.</p>
     <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">What are cookies?</h2><p className="text-zinc-400 text-sm leading-relaxed">Cookies are small text files placed on your device when you visit a website. They are widely used to make websites work, improve efficiency, and provide analytical information to site owners. The UTH platform uses cookies primarily to maintain your authenticated session securely.</p></section>
     <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">Types of cookies we use</h2>
       <div className="space-y-4">
@@ -24,7 +24,6 @@ export default function CookiesPage() {
       </tbody></table></div>
     </section>
     <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">Managing cookies</h2><p className="text-zinc-400 text-sm leading-relaxed">You can control and/or delete cookies at any time. You may set your browser to refuse all cookies or to indicate when a cookie is being sent. However, if you disable strictly necessary cookies, you will not be able to log in to the UTH platform. For analytics and marketing cookies, you may opt out at any time via our cookie preference centre.</p></section>
-    <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">Changes to this policy</h2><p className="text-zinc-400 text-sm leading-relaxed">Empatixtech reserves the right to modify this Cookie Policy at any time. Updates will be published on our website. Continued use constitutes acceptance of any changes.</p></section>
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 text-sm text-zinc-400"><strong className="text-white">Contact: </strong>For questions about our cookie use, email <a href="mailto:privacy@empatixtech.com" className="text-indigo-400 hover:underline">privacy@empatixtech.com</a></div>
-  </div><footer className="border-t border-white/8 px-6 py-6 text-center text-zinc-600 text-xs">© 2025 Empatixtech. <Link href="/" className="hover:text-zinc-400 ml-1">← Back to UTH</Link></footer></div>);
+    <section className="mb-10"><h2 className="text-xl font-bold text-white mb-4 pb-2 border-b border-zinc-800">Changes to this policy</h2><p className="text-zinc-400 text-sm leading-relaxed">We reserve the right to modify this Cookie Policy at any time. Updates will be published on our platform. Continued use constitutes acceptance of any changes.</p></section>
+  </div><footer className="border-t border-white/8 px-6 py-6 text-center text-zinc-700 text-xs"><Link href="/" className="hover:text-zinc-400">← Back to UTH</Link></footer></div>);
 }

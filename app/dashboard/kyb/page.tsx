@@ -52,6 +52,12 @@ function loadCountryOverrides(): Record<string, "Low" | "Medium" | "High" | "Pro
 }
 function saveCountryOverrides(o: Record<string, "Low" | "Medium" | "High" | "Prohibited">) {
   try { localStorage.setItem(COUNTRY_RISK_OVERRIDES_KEY, JSON.stringify(o)); } catch {}
+  // Sync to backend (fire-and-forget) so /api/risk/evaluate can read tenant overrides
+  fetch("/api/admin/country-risk", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(o),
+  }).catch(() => {});
 }
 function applyCountryOverride(country: string, risk: "Low" | "Medium" | "High" | "Prohibited") {
   _countryOverrides = { ..._countryOverrides, [country]: risk };

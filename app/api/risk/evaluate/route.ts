@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/jwt";
 import { verifyApiKey } from "@/lib/api-key-auth";
+import { redis } from "@/lib/redis";
+
+const DEMO_TID = "c7ed9c17-0633-49df-9bc7-81de55f69fb7";
+const HIGH_RISK_LEVELS = new Set(["High", "Prohibited"]);
 
 export async function POST(req: NextRequest) {
   let claims: Record<string, unknown> | null = null;
@@ -20,16 +24,29 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const {
-    context = "operation", // "login" | "operation" | "payment" | "account_change"
+    context = "operation",
     operationType,
     amount,
     currency,
-    signals = {},
+    signals: rawSignals = {},
+    country,
     ip,
     userId,
     sessionId,
     metadata = {},
   } = body;
+
+  // Resolve country → highRiskCountry signal via tenant overrides
+  const signals = { ...rawSignals };
+  if (country && !signals.highRiskCountry) {
+    try {
+      const tenantId = (!claims.tid || claims.tid === "default") ? DEMO_TID : claims.tid as string;
+      const overrides = await redis.get<Record<string, string>>(`tenant:country-risk:${tenantId}`);
+      if (overrides && HIGH_RISK_LEVELS.has(overrides[country])) {
+        signals.highRiskCountry = true;
+      }
+    } catch {}
+  }
 
   // Device Trust Layer
   let deviceScore = 0;

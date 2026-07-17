@@ -53,7 +53,21 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 
-function DevicePanel({ device, onClose }: { device: Device; onClose: () => void }) {
+function DevicePanel({ device, onClose, onRevoke }: { device: Device; onClose: () => void; onRevoke: (id: string) => void }) {
+  const [revoking, setRevoking] = useState(false);
+  const [revoked, setRevoked] = useState(device.status === "revoked");
+
+  const revoke = async () => {
+    setRevoking(true);
+    const r = await fetch("/api/devices", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId: device.id }),
+    });
+    if (r.ok) { setRevoked(true); onRevoke(device.id); }
+    setRevoking(false);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -65,7 +79,7 @@ function DevicePanel({ device, onClose }: { device: Device; onClose: () => void 
           </div>
           <button onClick={onClose} className="text-zinc-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
         </div>
-        <div className="p-5 space-y-5 text-xs">
+        <div className="p-5 space-y-5 text-xs flex-1">
           <Section title="Identity">
             <Row label="Device ID" value={<span className="font-mono text-zinc-300 break-all text-[10px]">{device.id}</span>} />
             <Row label="Fingerprint" value={<span className="font-mono text-zinc-300">{device.fingerprint || "—"}</span>} />
@@ -77,7 +91,7 @@ function DevicePanel({ device, onClose }: { device: Device; onClose: () => void 
             <p className="text-zinc-400 font-mono leading-relaxed break-all">{device.user_agent || "—"}</p>
           </Section>
           <Section title="Status">
-            <Row label="Status" value={<StatusBadge status={device.status} />} />
+            <Row label="Status" value={<StatusBadge status={revoked ? "revoked" : device.status} />} />
             <Row label="Attestation" value={
               <span className="flex items-center gap-1">
                 {device.attestation_verified
@@ -96,6 +110,20 @@ function DevicePanel({ device, onClose }: { device: Device; onClose: () => void 
           <Section title="Registered">
             <Row label="Date" value={new Date(device.created_at).toLocaleString()} />
           </Section>
+
+          {!revoked ? (
+            <button
+              onClick={revoke}
+              disabled={revoking}
+              className="w-full py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {revoking ? "Revoking…" : "Revoke device binding"}
+            </button>
+          ) : (
+            <div className="w-full py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-500 text-xs text-center">
+              Device binding revoked
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -207,7 +235,10 @@ export default function DevicesPage() {
         </div>
       </div>
 
-      {selected && <DevicePanel device={selected} onClose={() => setSelected(null)} />}
+      {selected && <DevicePanel device={selected} onClose={() => setSelected(null)} onRevoke={(id) => {
+        setDevices(prev => prev.map(d => d.id === id ? { ...d, status: "revoked" } : d));
+        setSelected(null);
+      }} />}
     </div>
   );
 }

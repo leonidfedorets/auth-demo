@@ -1468,15 +1468,40 @@ export default function OnboardingPage() {
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(() => flows[0]?.id ?? null);
   const [events, setEvents] = useState<EventBinding[]>(() => loadEvents());
   const [ready, setReady] = useState(false);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     fetch("/api/auth/me").then(async r => {
       if (r.status === 401) { router.push("/login"); return; }
       const d = await r.json();
       setUser(d.user);
+      // Load persisted state from backend; prefer it over localStorage if non-empty
+      try {
+        const res = await fetch("/api/admin/onboarding");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.steps?.length) { setSteps(data.steps); saveSteps(data.steps); }
+          if (data.flows?.length) { setFlows(data.flows); saveFlows(data.flows); setSelectedFlowId(data.flows[0]?.id ?? null); }
+          if (data.events?.length) { setEvents(data.events); saveEvents(data.events); }
+        }
+      } catch {}
       setReady(true);
     });
   }, [router]);
+
+  // Debounced backend sync whenever steps/flows/events change (after ready)
+  useEffect(() => {
+    if (!ready) return;
+    clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      fetch("/api/admin/onboarding", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ steps, flows, events }),
+      }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(syncTimer.current);
+  }, [steps, flows, events, ready]);
 
   if (!ready) return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center">

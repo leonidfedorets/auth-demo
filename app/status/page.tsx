@@ -16,6 +16,6 @@ export default function StatusPage() {
       <div className="space-y-3 mb-10">{SERVICES.map(s => (<div key={s.name} className="rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-4 flex items-center justify-between"><div className="flex items-center gap-3"><CheckCircle2 className="w-4 h-4 text-green-400" /><span className="text-white font-medium text-sm">{s.name}</span></div><div className="flex items-center gap-4"><span className="text-zinc-500 text-xs">{s.uptime} uptime</span><span className="text-green-400 text-xs font-medium capitalize">{s.status}</span></div></div>))}</div>
       <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5"><h3 className="font-semibold text-white mb-3 text-sm">Recent incidents</h3><p className="text-zinc-500 text-sm">No incidents in the last 90 days.</p></div>
     </div>
-    <footer className="border-t border-white/8 px-6 py-6 text-center text-zinc-600 text-xs">© 2025 Empatixtech. <Link href="/" className="hover:text-zinc-400 ml-1">← Back to UTH</Link></footer>
+    <footer className="border-t border-white/8 px-6 py-6 text-center text-zinc-600 text-xs">© UTH Demo · <Link href="/" className="hover:text-zinc-400 ml-1">← Back to UTH</Link></footer>
   </div>);
 }
