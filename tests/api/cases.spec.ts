@@ -1,17 +1,20 @@
 import { test, expect } from "@playwright/test";
 
 const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
-const IS_PROD = process.env.IS_PROD === "true";
+const IS_PROD = BASE.startsWith("https://");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getAuthCookie(request: any) {
+async function getAuthCookie(request: any): Promise<{ cookie: string; scaRequired: boolean }> {
   const r = await request.post(`${BASE}/api/auth/login`, {
     data: { email: "leonidfedorets30@gmail.com", password: "Zadov281983" },
   });
+  if (r.status() !== 200) return { cookie: "", scaRequired: false };
+  const body = await r.json().catch(() => ({}));
+  if (body.scaRequired) return { cookie: "", scaRequired: true };
   const setCookie = r.headers()["set-cookie"] || "";
   const match = setCookie.match(/access_token=([^;]+)/);
-  return match ? `access_token=${match[1]}` : "";
+  return { cookie: match ? `access_token=${match[1]}` : "", scaRequired: false };
 }
 
 // ── Suite ─────────────────────────────────────────────────────────────────────
@@ -35,7 +38,12 @@ test.describe("Cases API", () => {
 
   test("Setup: authenticate and store cookie", async ({ request: req }) => {
     if (!IS_PROD) { test.skip(true, "Requires real DB"); return; }
-    cookie = await getAuthCookie(req);
+    const result = await getAuthCookie(req);
+    if (result.scaRequired) {
+      test.skip(true, "Step-up MFA required — session not fully established");
+      return;
+    }
+    cookie = result.cookie;
     expect(cookie).toBeTruthy();
     expect(cookie).toContain("access_token=");
   });
