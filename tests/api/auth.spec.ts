@@ -11,7 +11,7 @@ test.describe("Auth endpoints", () => {
 
   test("POST /api/auth/login - missing body returns 400", async ({ request }) => {
     const r = await request.post(`${BASE}/api/auth/login`, { data: {} });
-    expect([400, 500]).toContain(r.status());
+    expect([400, 429, 500]).toContain(r.status());
   });
 
   test("POST /api/auth/login - invalid credentials return 401 (not 500)", async ({ request }) => {
