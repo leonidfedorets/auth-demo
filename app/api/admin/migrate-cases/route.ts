@@ -47,6 +47,97 @@ export async function POST(req: NextRequest) {
     results.push("case_type_fields: ok");
   } catch (e) { results.push(`case_type_fields: ${e}`); }
 
+  // ── Flow-builder tables ───────────────────────────────────────────────
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS case_type_transitions (
+        id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        case_type_id    TEXT NOT NULL REFERENCES case_types(id) ON DELETE CASCADE,
+        from_status     TEXT NOT NULL,
+        to_status       TEXT NOT NULL,
+        requires_reason BOOLEAN NOT NULL DEFAULT false,
+        notify_roles    JSONB NOT NULL DEFAULT '[]',
+        auto_action     TEXT,
+        UNIQUE(case_type_id, from_status, to_status)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ctt_type ON case_type_transitions(case_type_id)`;
+    results.push("case_type_transitions: ok");
+  } catch (e) { results.push(`case_type_transitions: ${e}`); }
+
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS case_type_approver_templates (
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        case_type_id TEXT NOT NULL REFERENCES case_types(id) ON DELETE CASCADE,
+        name         TEXT NOT NULL,
+        role         TEXT NOT NULL,
+        sort_order   INT NOT NULL DEFAULT 0
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_ctat_type ON case_type_approver_templates(case_type_id)`;
+    results.push("case_type_approver_templates: ok");
+  } catch (e) { results.push(`case_type_approver_templates: ${e}`); }
+
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS case_type_sla (
+        case_type_id    TEXT PRIMARY KEY REFERENCES case_types(id) ON DELETE CASCADE,
+        sla_days        INT NOT NULL DEFAULT 5,
+        escalation_days INT,
+        escalate_to     TEXT
+      )
+    `;
+    results.push("case_type_sla: ok");
+  } catch (e) { results.push(`case_type_sla: ${e}`); }
+
+  // Seed default transitions + SLA for existing case types
+  const defaultTransitions = [
+    ["new","active"],["active","rfi"],["active","complete"],
+    ["active","reject"],["active","handoff"],["rfi","active"],
+    ["handoff","active"],["complete","pending_approval"],
+    ["complete","closed"],["reject","pending_approval"],
+    ["reject","closed"],["pending_approval","closed"],
+    ["pending_approval","active"],["closed","active"],
+  ];
+  const caseTypeIds = ["ct1","ct2","ct3","ct4","ct5","ct6"];
+  for (const ctId of caseTypeIds) {
+    for (const [from, to] of defaultTransitions) {
+      try {
+        await sql`
+          INSERT INTO case_type_transitions (case_type_id, from_status, to_status)
+          VALUES (${ctId}, ${from}, ${to})
+          ON CONFLICT (case_type_id, from_status, to_status) DO NOTHING
+        `;
+      } catch { /* ok */ }
+    }
+    try {
+      await sql`
+        INSERT INTO case_type_sla (case_type_id, sla_days)
+        VALUES (${ctId}, 5)
+        ON CONFLICT (case_type_id) DO NOTHING
+      `;
+    } catch { /* ok */ }
+  }
+  // Seed approver templates for approval-required types
+  const approverTemplates: Array<{ctId:string;name:string;role:string;order:number}> = [
+    {ctId:"ct1",name:"Head of Compliance",role:"Head of Compliance",order:0},
+    {ctId:"ct1",name:"MLRO",role:"MLRO",order:1},
+    {ctId:"ct2",name:"Head of AML",role:"Head of AML",order:0},
+    {ctId:"ct2",name:"MLRO",role:"MLRO",order:1},
+    {ctId:"ct3",name:"Head of Fraud",role:"Head of Fraud",order:0},
+  ];
+  for (const a of approverTemplates) {
+    try {
+      await sql`
+        INSERT INTO case_type_approver_templates (case_type_id, name, role, sort_order)
+        VALUES (${a.ctId}, ${a.name}, ${a.role}, ${a.order})
+        ON CONFLICT DO NOTHING
+      `;
+    } catch { /* ok */ }
+  }
+  results.push("flow-builder tables seeded: ok");
+
   try {
     await sql`CREATE SEQUENCE IF NOT EXISTS case_number_seq START 2848`;
     results.push("case_number_seq: ok");

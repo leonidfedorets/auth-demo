@@ -104,7 +104,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 }
 
-const VALID_TRANSITIONS: Record<string, string[]> = {
+const FALLBACK_TRANSITIONS: Record<string, string[]> = {
   new: ["active"],
   active: ["rfi", "complete", "reject", "handoff"],
   rfi: ["active"],
@@ -114,6 +114,20 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   pending_approval: ["closed", "active"],
   closed: ["active"],
 };
+
+async function getAllowedTransitions(caseRow: Record<string, unknown>): Promise<string[]> {
+  const typeId = caseRow.type_id as string | null;
+  const currentStatus = caseRow.status as string;
+  if (!typeId) return FALLBACK_TRANSITIONS[currentStatus] ?? [];
+  try {
+    const rows = await sql`
+      SELECT to_status FROM case_type_transitions
+      WHERE case_type_id = ${typeId} AND from_status = ${currentStatus}
+    `;
+    if (rows.rows.length > 0) return rows.rows.map(r => r.to_status as string);
+  } catch { /* table may not exist in older envs */ }
+  return FALLBACK_TRANSITIONS[currentStatus] ?? [];
+}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await authenticate(req);
@@ -133,7 +147,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // Status transition
     if (body.status && body.status !== current.status) {
-      const allowed = VALID_TRANSITIONS[current.status as string] ?? [];
+      const allowed = await getAllowedTransitions(current as Record<string, unknown>);
       if (!allowed.includes(body.status as string)) {
         return NextResponse.json({
           error: `invalid transition ${current.status} → ${body.status}`,

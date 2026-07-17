@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/kyb", label: "KYB" },
   { href: "/dashboard/cdd", label: "CDD" },
   { href: "/dashboard/cases", label: "Cases" },
+  { href: "/dashboard/cases/builder", label: "Flow Builder" },
   { href: "/dashboard/onboarding", label: "Onboarding" },
   { href: "/dashboard/risk-rules", label: "Risk Rules" },
   { href: "/dashboard/settings", label: "Settings" },

@@ -107,10 +107,15 @@ export async function POST(req: NextRequest) {
   const reporterName = reporter || auth.email || "operator";
 
   try {
-    // Get type name
-    const ct = await sql`SELECT name, department FROM case_types WHERE id = ${typeId}`;
+    // Get type info including SLA and approval config
+    const ct = await sql`SELECT ct.*, s.sla_days FROM case_types ct LEFT JOIN case_type_sla s ON s.case_type_id = ct.id WHERE ct.id = ${typeId}`;
     if (!ct.rows.length) return NextResponse.json({ error: "invalid typeId" }, { status: 400 });
-    const dept = (department || ct.rows[0].department) as string;
+    const ctRow = ct.rows[0];
+    const dept = (department || ctRow.department) as string;
+
+    // Use per-type SLA if configured, else 7 days
+    const slaDays = ctRow.sla_days ? Number(ctRow.sla_days) : 7;
+    const slaDueAt = new Date(Date.now() + slaDays * 86400000).toISOString().slice(0, 10);
 
     // Generate case ID using sequence
     const seqRow = await sql`SELECT 'CS-' || nextval('case_number_seq') AS case_id`;
@@ -120,7 +125,7 @@ export async function POST(req: NextRequest) {
       INSERT INTO cases (id, type_id, client_id, client_name, department, status, reporter, license, sla_due_at, description, custom_fields, transaction_id)
       VALUES (
         ${caseId}, ${typeId}, ${clientId ?? null}, ${clientName ?? null},
-        ${dept}, 'new', ${reporterName}, ${license}, ${sla},
+        ${dept}, 'new', ${reporterName}, ${license}, ${slaDueAt},
         ${description}, ${JSON.stringify(customFields ?? {})}, ${transactionId ?? null}
       )
     `;
@@ -130,6 +135,21 @@ export async function POST(req: NextRequest) {
       INSERT INTO case_audit (case_id, actor, action, field, old_val, new_val, context)
       VALUES (${caseId}, ${reporterName}, 'Case Created', 'status', '—', 'new', ${'initiation=manual'})
     `;
+
+    // Auto-seed approvers from the case type's approver template
+    if (ctRow.approval_required) {
+      try {
+        const templates = await sql`
+          SELECT * FROM case_type_approver_templates WHERE case_type_id = ${typeId} ORDER BY sort_order
+        `;
+        for (const t of templates.rows) {
+          await sql`
+            INSERT INTO case_approvers (case_id, name, role, status)
+            VALUES (${caseId}, ${t.name as string}, ${t.role as string}, 'pending')
+          `;
+        }
+      } catch { /* table may not exist in older envs */ }
+    }
 
     return NextResponse.json({ id: caseId, status: "new" }, { status: 201 });
   } catch (e) {
