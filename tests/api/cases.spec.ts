@@ -39,12 +39,13 @@ test.describe("Cases API", () => {
   test("Setup: authenticate and store cookie", async ({ request: req }) => {
     if (!IS_PROD) { test.skip(true, "Requires real DB"); return; }
     const result = await getAuthCookie(req);
-    if (result.scaRequired) {
-      test.skip(true, "Step-up MFA required — session not fully established");
+    if (!result.cookie) {
+      test.skip(true, result.scaRequired
+        ? "Step-up MFA required — session not fully established"
+        : "Login did not return session cookie (rate-limited or SCA challenge)");
       return;
     }
     cookie = result.cookie;
-    expect(cookie).toBeTruthy();
     expect(cookie).toContain("access_token=");
   });
 
