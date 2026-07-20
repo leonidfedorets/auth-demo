@@ -53,7 +53,7 @@ interface ApproverTemplate { id: string; name: string; role: string; roleId: str
 interface Role { id: string; name: string; description: string; color: string; userCount: number }
 interface OrgDept { id: string; name: string; description: string; headEmail: string; members: { type: "user" | "role"; ref: string }[] }
 interface UserInfo { id: string; email: string; displayName: string }
-interface FlowTransition { from: CaseStatus; to: CaseStatus; requiresReason: boolean }
+interface FlowTransition { from: CaseStatus; to: CaseStatus; requiresReason: boolean; notifyRoles: string[]; autoAction: string }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const STATUS_META: Record<CaseStatus,{label:string;color:string}> = {
@@ -1101,71 +1101,94 @@ function AnalyticsPanel(){
 }
 
 // ─── FLOW BUILDER ─────────────────────────────────────────────────────────────
-function FlowBuilder({caseTypeId}:{caseTypeId:string}){
+function FlowBuilder({caseTypeId,allRoles}:{caseTypeId:string;allRoles:Role[]}){
   const [transitions,setTransitions]=useState<FlowTransition[]>([]);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [err,setErr]=useState("");
   const [saved,setSaved]=useState(false);
+  // track which transition has the role-add dropdown open: "from:to"
+  const [addRoleTo,setAddRoleTo]=useState<string|null>(null);
 
   useEffect(()=>{
     setLoading(true);
     fetch(`/api/admin/case-types/${caseTypeId}/transitions`)
       .then(r=>r.json())
-      .then(d=>{
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setTransitions((d.transitions||[]).map((t:any)=>({from:t.from as CaseStatus,to:t.to as CaseStatus,requiresReason:!!t.requiresReason})));
-      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(d=>setTransitions((d.transitions||[]).map((t:any)=>({
+        from:t.from as CaseStatus,to:t.to as CaseStatus,
+        requiresReason:!!t.requiresReason,
+        notifyRoles:Array.isArray(t.notifyRoles)?t.notifyRoles:[],
+        autoAction:t.autoAction??""
+      }))))
       .catch(()=>{})
       .finally(()=>setLoading(false));
   },[caseTypeId]);
+
+  const key=(from:CaseStatus,to:CaseStatus)=>`${from}:${to}`;
 
   function toggle(from:CaseStatus,to:CaseStatus){
     setTransitions(prev=>{
       const exists=prev.some(t=>t.from===from&&t.to===to);
       if(exists) return prev.filter(t=>!(t.from===from&&t.to===to));
-      return [...prev,{from,to,requiresReason:false}];
+      return [...prev,{from,to,requiresReason:false,notifyRoles:[],autoAction:""}];
     });
     setSaved(false);
   }
 
-  function toggleReason(from:CaseStatus,to:CaseStatus,e:React.MouseEvent){
-    e.stopPropagation();
-    setTransitions(prev=>prev.map(t=>t.from===from&&t.to===to?{...t,requiresReason:!t.requiresReason}:t));
+  function patchTx(from:CaseStatus,to:CaseStatus,patch:Partial<FlowTransition>){
+    setTransitions(prev=>prev.map(t=>t.from===from&&t.to===to?{...t,...patch}:t));
+    setSaved(false);
+  }
+
+  function addNotifyRole(from:CaseStatus,to:CaseStatus,roleId:string){
+    if(!roleId)return;
+    setTransitions(prev=>prev.map(t=>t.from===from&&t.to===to&&!t.notifyRoles.includes(roleId)
+      ?{...t,notifyRoles:[...t.notifyRoles,roleId]}:t));
+    setAddRoleTo(null);
+    setSaved(false);
+  }
+
+  function removeNotifyRole(from:CaseStatus,to:CaseStatus,roleId:string){
+    setTransitions(prev=>prev.map(t=>t.from===from&&t.to===to
+      ?{...t,notifyRoles:t.notifyRoles.filter(r=>r!==roleId)}:t));
     setSaved(false);
   }
 
   function isEnabled(from:CaseStatus,to:CaseStatus){return transitions.some(t=>t.from===from&&t.to===to);}
-  function needsReason(from:CaseStatus,to:CaseStatus){return transitions.find(t=>t.from===from&&t.to===to)?.requiresReason??false;}
+  function getTx(from:CaseStatus,to:CaseStatus){return transitions.find(t=>t.from===from&&t.to===to);}
 
   async function save(){
-    setSaving(true); setErr(""); setSaved(false);
-    try {
+    setSaving(true);setErr("");setSaved(false);
+    try{
       const r=await fetch(`/api/admin/case-types/${caseTypeId}/transitions`,{
         method:"PUT",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({transitions}),
       });
       if(!r.ok){const d=await r.json();setErr(d.error||"Failed");}
       else setSaved(true);
-    } catch(e){setErr(String(e));}
+    }catch(e){setErr(String(e));}
     setSaving(false);
   }
 
   if(loading) return <div className="py-4 flex justify-center"><Spinner/></div>;
 
-  return <div>
-    <div className="flex items-center justify-between mb-3">
-      <div>
-        <p className="text-[10px] text-zinc-600">Check each allowed transition. Click <span className="text-amber-400 font-mono">✱</span> on an enabled cell to require a reason.</p>
-      </div>
+  const enabledTransitions=transitions.filter(t=>t.from!==t.to);
+
+  return <div className="space-y-5">
+    {/* ── Header ── */}
+    <div className="flex items-center justify-between">
+      <p className="text-[10px] text-zinc-500">Check cells in the matrix to allow that transition. Configure notifications and rules below.</p>
       <div className="flex items-center gap-2 shrink-0">
         {err&&<span className="text-xs text-red-400">{err}</span>}
-        {saved&&!saving&&<span className="text-xs text-green-400">Saved</span>}
+        {saved&&!saving&&<span className="text-xs text-green-400 flex items-center gap-1"><Check className="w-3 h-3"/>Saved</span>}
         <Button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-7 text-xs px-3 disabled:opacity-50">
           {saving?<Spinner/>:"Save Flow"}
         </Button>
       </div>
     </div>
+
+    {/* ── Enable/Disable Matrix ── */}
     <div className="overflow-x-auto rounded-lg border border-zinc-800">
       <table className="text-[10px] w-full">
         <thead>
@@ -1175,30 +1198,119 @@ function FlowBuilder({caseTypeId}:{caseTypeId:string}){
           </tr>
         </thead>
         <tbody>
-          {ALL_STATUSES.map(from=><tr key={from} className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/20">
+          {ALL_STATUSES.map(from=><tr key={from} className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/10">
             <td className="px-3 py-2 text-zinc-300 font-medium whitespace-nowrap">{STATUS_META[from]?.label??from}</td>
-            {ALL_STATUSES.map(to=><td key={to} className="px-2 py-1.5 text-center">
-              {from===to
-                ?<span className="text-zinc-800">—</span>
-                :<div className="flex flex-col items-center gap-0.5">
-                  <button
-                    onClick={()=>toggle(from,to)}
-                    className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition-colors ${isEnabled(from,to)?"bg-indigo-500 border-indigo-400 text-white":"border-zinc-700 hover:border-zinc-500"}`}
-                  >
-                    {isEnabled(from,to)&&<Check className="w-2.5 h-2.5"/>}
-                  </button>
-                  {isEnabled(from,to)&&<button
-                    onClick={e=>toggleReason(from,to,e)}
-                    title="Toggle: requires reason"
-                    className={`text-[9px] font-mono cursor-pointer leading-none transition-colors ${needsReason(from,to)?"text-amber-400":"text-zinc-700 hover:text-zinc-500"}`}
-                  >✱</button>}
-                </div>
-              }
-            </td>)}
+            {ALL_STATUSES.map(to=>{
+              const en=isEnabled(from as CaseStatus,to as CaseStatus);
+              const tx=getTx(from as CaseStatus,to as CaseStatus);
+              return <td key={to} className="px-2 py-1.5 text-center">
+                {from===to
+                  ?<span className="text-zinc-800">—</span>
+                  :<div className="flex flex-col items-center gap-0.5">
+                    <button
+                      onClick={()=>toggle(from as CaseStatus,to as CaseStatus)}
+                      className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition-all ${en?"bg-indigo-500 border-indigo-400 text-white":"border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800"}`}
+                    >{en&&<Check className="w-2.5 h-2.5"/>}</button>
+                    {/* indicators below the checkbox */}
+                    {en&&tx&&<div className="flex gap-0.5 mt-0.5">
+                      {tx.requiresReason&&<span className="text-amber-400 text-[8px] leading-none" title="Requires reason">✱</span>}
+                      {tx.notifyRoles.length>0&&<span className="text-indigo-400 text-[8px] leading-none" title={`Notifies ${tx.notifyRoles.length} role(s)`}>●</span>}
+                    </div>}
+                  </div>
+                }
+              </td>;
+            })}
           </tr>)}
         </tbody>
       </table>
     </div>
+
+    {/* ── Transition Settings ── */}
+    {enabledTransitions.length>0&&<div>
+      <p className="text-xs font-semibold text-zinc-300 mb-2">
+        Transition Settings
+        <span className="ml-2 text-[10px] text-zinc-600 font-normal">{enabledTransitions.length} enabled</span>
+      </p>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/30 divide-y divide-zinc-800/60">
+        {enabledTransitions.map(tx=>{
+          const k=key(tx.from,tx.to);
+          const assignedRoleIds=new Set(tx.notifyRoles);
+          const availableRoles=allRoles.filter(r=>!assignedRoleIds.has(r.id));
+          return <div key={k} className="px-4 py-3 space-y-2">
+            {/* Row header */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <StatusBadge status={tx.from}/>
+              <ArrowRight className="w-3 h-3 text-zinc-600 shrink-0"/>
+              <StatusBadge status={tx.to}/>
+
+              {/* Requires reason toggle */}
+              <label className="flex items-center gap-1.5 cursor-pointer ml-auto">
+                <input
+                  type="checkbox"
+                  checked={tx.requiresReason}
+                  onChange={e=>patchTx(tx.from,tx.to,{requiresReason:e.target.checked})}
+                  className="accent-amber-500 w-3 h-3"
+                />
+                <span className="text-[10px] text-zinc-400">Requires reason</span>
+              </label>
+            </div>
+
+            {/* Notify roles */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-zinc-600 shrink-0">Notify:</span>
+              {tx.notifyRoles.length===0&&<span className="text-[10px] text-zinc-700 italic">no roles</span>}
+              {tx.notifyRoles.map(rid=>{
+                const role=allRoles.find(r=>r.id===rid);
+                return role
+                  ?<span key={rid} className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${COLOR_CLASSES[role.color]??COLOR_CLASSES.indigo}`}>
+                    {role.name}
+                    <button onClick={()=>removeNotifyRole(tx.from,tx.to,rid)} className="hover:text-red-400 cursor-pointer leading-none"><X className="w-2.5 h-2.5"/></button>
+                  </span>
+                  :<span key={rid} className="text-[10px] text-zinc-600 border border-zinc-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    {rid.slice(0,8)}…
+                    <button onClick={()=>removeNotifyRole(tx.from,tx.to,rid)} className="hover:text-red-400 cursor-pointer"><X className="w-2.5 h-2.5"/></button>
+                  </span>;
+              })}
+
+              {/* Add role */}
+              {availableRoles.length>0&&(
+                addRoleTo===k
+                  ?<div className="flex items-center gap-1">
+                    <select
+                      autoFocus
+                      defaultValue=""
+                      onChange={e=>{addNotifyRole(tx.from,tx.to,e.target.value);}}
+                      className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-[10px] text-white h-6 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">Pick role…</option>
+                      {availableRoles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                    <button onClick={()=>setAddRoleTo(null)} className="text-zinc-600 hover:text-zinc-400 cursor-pointer"><X className="w-3 h-3"/></button>
+                  </div>
+                  :<button
+                    onClick={()=>setAddRoleTo(k)}
+                    className="flex items-center gap-0.5 text-[10px] text-indigo-400 hover:text-indigo-300 cursor-pointer px-1.5 py-0.5 rounded hover:bg-indigo-500/10 border border-indigo-500/30 transition-colors"
+                  ><Plus className="w-2.5 h-2.5"/>Role</button>
+              )}
+            </div>
+
+            {/* Auto action */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-zinc-600 shrink-0 w-20">Auto action:</span>
+              <input
+                type="text"
+                value={tx.autoAction}
+                onChange={e=>patchTx(tx.from,tx.to,{autoAction:e.target.value})}
+                placeholder="e.g. send_email, create_zoho_ticket (optional)"
+                className="flex-1 bg-zinc-800/60 border border-zinc-800 rounded px-2 py-1 text-[10px] text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>}
+
+    {enabledTransitions.length===0&&<p className="text-[10px] text-zinc-600 text-center py-4">No transitions enabled yet. Check cells in the matrix above.</p>}
   </div>;
 }
 
@@ -1622,7 +1734,7 @@ function CaseTypesPanel({caseTypes,allRoles,onRefresh}:{caseTypes:CaseType[];all
 
           {/* Status Flow section */}
           {expSection==="flow"&&<div className="mt-4">
-            <FlowBuilder caseTypeId={t.id}/>
+            <FlowBuilder caseTypeId={t.id} allRoles={allRoles}/>
           </div>}
 
           {/* Approval Levels section */}
