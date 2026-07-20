@@ -11,6 +11,15 @@ async function authenticate(req: NextRequest) {
   return null;
 }
 
+async function ensureColumns() {
+  await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium'`;
+  await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS description TEXT`;
+  await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS color TEXT DEFAULT 'indigo'`;
+  await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS allowed_initiator_roles JSONB DEFAULT '[]'`;
+  await sql`ALTER TABLE case_type_approver_templates ADD COLUMN IF NOT EXISTS role_id UUID`;
+  await sql`ALTER TABLE case_type_approver_templates ADD COLUMN IF NOT EXISTS display_name TEXT`;
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -20,6 +29,7 @@ export async function GET(
   const { id } = await params;
 
   try {
+    await ensureColumns();
     const [type, fields, transitions, approvers, sla] = await Promise.all([
       sql`SELECT * FROM case_types WHERE id = ${id}`,
       sql`SELECT * FROM case_type_fields WHERE case_type_id = ${id} ORDER BY sort_order`,
@@ -70,6 +80,7 @@ export async function PUT(
   try { body = await req.json(); } catch { return NextResponse.json({ error: "invalid json" }, { status: 400 }); }
 
   try {
+    await ensureColumns();
     const existing = await sql`SELECT id, version FROM case_types WHERE id = ${id}`;
     if (!existing.rows.length) return NextResponse.json({ error: "not found" }, { status: 404 });
 

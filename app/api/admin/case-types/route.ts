@@ -11,11 +11,21 @@ async function authenticate(req: NextRequest) {
   return null;
 }
 
+async function ensureColumns() {
+  await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium'`;
+  await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS description TEXT`;
+  await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS color TEXT DEFAULT 'indigo'`;
+  await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS allowed_initiator_roles JSONB DEFAULT '[]'`;
+  await sql`ALTER TABLE case_type_approver_templates ADD COLUMN IF NOT EXISTS role_id UUID`;
+  await sql`ALTER TABLE case_type_approver_templates ADD COLUMN IF NOT EXISTS display_name TEXT`;
+}
+
 export async function GET(req: NextRequest) {
   const auth = await authenticate(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   try {
+    await ensureColumns();
     const [types, fields, transitions, approvers, sla] = await Promise.all([
       sql`SELECT * FROM case_types ORDER BY name`,
       sql`SELECT * FROM case_type_fields ORDER BY case_type_id, sort_order`,
@@ -91,6 +101,7 @@ export async function POST(req: NextRequest) {
   if (!name?.trim()) return NextResponse.json({ error: "name required" }, { status: 400 });
   if (!department) return NextResponse.json({ error: "department required" }, { status: 400 });
 
+  await ensureColumns();
   const id = `ct${Date.now()}`;
   const defaultTransitions = [
     ["new","active"],["active","rfi"],["active","complete"],["active","reject"],

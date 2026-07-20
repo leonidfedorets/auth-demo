@@ -11,6 +11,11 @@ async function authenticate(req: NextRequest) {
   return null;
 }
 
+async function ensureApproverCols() {
+  await sql`ALTER TABLE case_type_approver_templates ADD COLUMN IF NOT EXISTS role_id UUID`;
+  await sql`ALTER TABLE case_type_approver_templates ADD COLUMN IF NOT EXISTS display_name TEXT`;
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -19,6 +24,7 @@ export async function GET(
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   try {
+    await ensureApproverCols();
     const rows = await sql`
       SELECT t.id, t.name, t.role, t.sort_order, t.role_id, t.display_name,
              r.name AS role_name, r.color AS role_color
@@ -61,6 +67,7 @@ export async function POST(
   }
 
   try {
+    await ensureApproverCols();
     // If roleId given, resolve the role name
     let resolvedName = roleName;
     let resolvedColor: string | null = null;

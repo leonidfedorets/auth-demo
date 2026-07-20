@@ -720,7 +720,7 @@ function RoleBadge({name,color}:{name:string;color?:string|null}){
 }
 
 // ─── ROLES PANEL ──────────────────────────────────────────────────────────────
-function RolesPanel(){
+function RolesPanel({allUsers}:{allUsers:UserInfo[]}){
   const [roles,setRoles]=useState<Role[]>([]);
   const [loading,setLoading]=useState(true);
   const [expanded,setExpanded]=useState<string|null>(null);
@@ -863,9 +863,15 @@ function RolesPanel(){
             </div>)}
           </div>
           {addingTo===r.id
-            ?<div className="flex gap-2">
-              <FIn value={newEmail} onChange={setNewEmail} placeholder="user@example.com"/>
-              <Button onClick={()=>addMember(r.id)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3">Add</Button>
+            ?<div className="flex gap-2 items-center">
+              {allUsers.length>0
+                ?<select value={newEmail} onChange={e=>setNewEmail(e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+                  <option value="">Select user…</option>
+                  {allUsers.filter(u=>!(members[r.id]||[]).some(m=>m.email===u.email)).map(u=><option key={u.email} value={u.email}>{u.displayName||u.email}</option>)}
+                </select>
+                :<FIn value={newEmail} onChange={setNewEmail} placeholder="user@example.com"/>
+              }
+              <Button onClick={()=>addMember(r.id)} disabled={!newEmail} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3 disabled:opacity-50">Add</Button>
               <button onClick={()=>{setAddingTo(null);setNewEmail("");}} className="text-zinc-500 hover:text-white cursor-pointer"><X className="w-4 h-4"/></button>
             </div>
             :<button onClick={()=>setAddingTo(r.id)} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer px-2 py-1 rounded-lg hover:bg-indigo-500/10 transition-colors">
@@ -879,7 +885,7 @@ function RolesPanel(){
 }
 
 // ─── DEPARTMENTS PANEL ────────────────────────────────────────────────────────
-function DepartmentsPanel({allRoles}:{allRoles:Role[]}){
+function DepartmentsPanel({allRoles,allUsers}:{allRoles:Role[];allUsers:UserInfo[]}){
   const [depts,setDepts]=useState<OrgDept[]>([]);
   const [loading,setLoading]=useState(true);
   const [expanded,setExpanded]=useState<string|null>(null);
@@ -1029,9 +1035,14 @@ function DepartmentsPanel({allRoles}:{allRoles:Role[]}){
                   {addType==="role"
                     ?<select value={addRef} onChange={e=>setAddRef(e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none">
                       <option value="">Select role…</option>
-                      {allRoles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+                      {allRoles.filter(r=>!d.members.some(m=>m.type==="role"&&m.ref===r.id)).map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
-                    :<FIn value={addRef} onChange={setAddRef} placeholder="user@example.com"/>
+                    :allUsers.length>0
+                      ?<select value={addRef} onChange={e=>setAddRef(e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none">
+                        <option value="">Select user…</option>
+                        {allUsers.filter(u=>!d.members.some(m=>m.type==="user"&&m.ref===u.email)).map(u=><option key={u.email} value={u.email}>{u.displayName||u.email}</option>)}
+                      </select>
+                      :<FIn value={addRef} onChange={setAddRef} placeholder="user@example.com"/>
                   }
                   <Button onClick={()=>addMember(d.id)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3">Add</Button>
                   <button onClick={()=>{setAddingTo(null);setAddRef("");}} className="text-zinc-500 hover:text-white cursor-pointer"><X className="w-4 h-4"/></button>
@@ -1732,8 +1743,8 @@ function CasesInner(){
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {tab==="analytics"&&<AnalyticsPanel/>}
       {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes} allRoles={allRoles} onRefresh={()=>{fetchCaseTypes();fetchCases();}}/>}
-      {tab==="roles"&&<RolesPanel/>}
-      {tab==="departments"&&<DepartmentsPanel allRoles={allRoles}/>}
+      {tab==="roles"&&<RolesPanel allUsers={allUsers}/>}
+      {tab==="departments"&&<DepartmentsPanel allRoles={allRoles} allUsers={allUsers}/>}
       {tab==="cases"&&<>
         {/* Filter bar */}
         <div className="flex flex-wrap gap-2 mb-4">
