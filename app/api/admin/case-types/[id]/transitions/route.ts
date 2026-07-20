@@ -11,6 +11,15 @@ async function authenticate(req: NextRequest) {
   return null;
 }
 
+const DEFAULT_FLOW_STATUSES = ["new","active","rfi","handoff","complete","reject","pending_approval","closed"];
+
+async function ensureFlowStatusesColumn() {
+  await sql`
+    ALTER TABLE case_types
+    ADD COLUMN IF NOT EXISTS flow_statuses JSONB DEFAULT '["new","active","rfi","handoff","complete","reject","pending_approval","closed"]'
+  `;
+}
+
 // GET /api/admin/case-types/[id]/transitions
 export async function GET(
   req: NextRequest,
@@ -20,17 +29,25 @@ export async function GET(
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   try {
-    const rows = await sql`SELECT * FROM case_type_transitions WHERE case_type_id = ${id} ORDER BY from_status, to_status`;
-    return NextResponse.json({ transitions: rows.rows.map(r => ({
-      id: r.id, from: r.from_status, to: r.to_status,
-      requiresReason: r.requires_reason, notifyRoles: r.notify_roles ?? [],
-      autoAction: r.auto_action ?? null,
-    })) });
+    await ensureFlowStatusesColumn();
+    const [rows, typeRow] = await Promise.all([
+      sql`SELECT * FROM case_type_transitions WHERE case_type_id = ${id} ORDER BY from_status, to_status`,
+      sql`SELECT flow_statuses FROM case_types WHERE id = ${id}`,
+    ]);
+    const flowStatuses: string[] = typeRow.rows[0]?.flow_statuses ?? DEFAULT_FLOW_STATUSES;
+    return NextResponse.json({
+      flowStatuses,
+      transitions: rows.rows.map(r => ({
+        id: r.id, from: r.from_status, to: r.to_status,
+        requiresReason: r.requires_reason, notifyRoles: r.notify_roles ?? [],
+        autoAction: r.auto_action ?? null,
+      })),
+    });
   } catch (e) { return NextResponse.json({ error: String(e) }, { status: 500 }); }
 }
 
-// PUT /api/admin/case-types/[id]/transitions  — full replacement of the transition set
-// Body: { transitions: Array<{ from, to, requiresReason?, notifyRoles?, autoAction? }> }
+// PUT /api/admin/case-types/[id]/transitions — full replacement
+// Body: { transitions: [...], flowStatuses?: string[] }
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -39,11 +56,25 @@ export async function PUT(
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
 
-  let body: { transitions: Array<{ from: string; to: string; requiresReason?: boolean; notifyRoles?: string[]; autoAction?: string | null }> };
+  let body: {
+    transitions: Array<{ from: string; to: string; requiresReason?: boolean; notifyRoles?: string[]; autoAction?: string | null }>;
+    flowStatuses?: string[];
+  };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "invalid json" }, { status: 400 }); }
   if (!Array.isArray(body.transitions)) return NextResponse.json({ error: "transitions array required" }, { status: 400 });
 
   try {
+    await ensureFlowStatusesColumn();
+
+    // Save flow statuses if provided
+    if (Array.isArray(body.flowStatuses)) {
+      await sql`UPDATE case_types SET flow_statuses = ${JSON.stringify(body.flowStatuses)} WHERE id = ${id}`;
+      // Remove transitions that reference statuses no longer in the flow
+      const flowSet = new Set(body.flowStatuses);
+      const filteredTransitions = body.transitions.filter(t => flowSet.has(t.from) && flowSet.has(t.to));
+      body = { ...body, transitions: filteredTransitions };
+    }
+
     await sql`DELETE FROM case_type_transitions WHERE case_type_id = ${id}`;
     for (const t of body.transitions) {
       await sql`
@@ -62,7 +93,6 @@ export async function PUT(
 }
 
 // PATCH /api/admin/case-types/[id]/transitions — toggle a single transition on/off
-// Body: { from, to, enabled, requiresReason?, notifyRoles?, autoAction? }
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
