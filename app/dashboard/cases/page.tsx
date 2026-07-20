@@ -103,7 +103,19 @@ const FIELD_TYPES = [
   {value:"phone",label:"Phone"},{value:"url",label:"URL"},
   {value:"dropdown",label:"Dropdown"},{value:"boolean",label:"Yes / No"},
 ];
+const REQUIRED_AT_STAGES = ["create","complete","close"] as const;
 const REQUIRED_AT_OPTS = ["create","complete","close","optional"];
+// requiredAt is stored as comma-separated stages, e.g. "create,close". "optional" = not required.
+function requiredAtHas(requiredAt:string, stage:string){
+  if(!requiredAt||requiredAt==="optional") return false;
+  return requiredAt.split(",").map(s=>s.trim()).includes(stage);
+}
+function requiredAtIsOptional(requiredAt:string){return !requiredAt||requiredAt==="optional"||requiredAt.split(",").every(s=>!s.trim());}
+function requiredAtLabel(requiredAt:string):string{
+  if(requiredAtIsOptional(requiredAt)) return "optional";
+  const parts=requiredAt.split(",").map(s=>s.trim()).filter(Boolean);
+  return parts.join(", ");
+}
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 function StatusBadge({status,allStatuses}:{status:CaseStatus;allStatuses?:AppStatus[]}){
@@ -142,11 +154,11 @@ function Modal({title,onClose,children,wide}:{title:string;onClose:()=>void;chil
     </div>
   </div>;
 }
-function FG({label,children,req}:{label:string;children:React.ReactNode;req?:boolean}){
-  return <div><Label className="text-zinc-400 text-[10px] mb-1 block">{label}{req&&<span className="text-red-400 ml-0.5">*</span>}</Label>{children}</div>;
+function FG({label,children,req,err}:{label:string;children:React.ReactNode;req?:boolean;err?:string}){
+  return <div><Label className="text-zinc-400 text-[10px] mb-1 block">{label}{req&&<span className="text-red-400 ml-0.5">*</span>}</Label>{children}{err&&<p className="text-[10px] text-red-400 mt-0.5">{err}</p>}</div>;
 }
-function FIn({value,onChange,placeholder,type,disabled}:{value:string|number;onChange:(v:string)=>void;placeholder?:string;type?:string;disabled?:boolean}){
-  return <Input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} disabled={disabled} className="bg-zinc-800 border-zinc-700 text-white text-xs h-8 disabled:opacity-50"/>;
+function FIn({value,onChange,placeholder,type,disabled,className}:{value:string|number;onChange:(v:string)=>void;placeholder?:string;type?:string;disabled?:boolean;className?:string}){
+  return <Input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} disabled={disabled} className={`bg-zinc-800 border-zinc-700 text-white text-xs h-8 disabled:opacity-50 ${className??""}`}/>;
 }
 function FSel({value,onChange,opts,placeholder,disabled}:{value:string;onChange:(v:string)=>void;opts:string[];placeholder?:string;disabled?:boolean}){
   return <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500 disabled:opacity-50"><option value="">{placeholder||"Select…"}</option>{opts.map(o=><option key={o} value={o}>{o}</option>)}</select>;
@@ -283,9 +295,9 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
     {/* Step 3: Custom Fields */}
     {step===3&&ctype&&<div className="space-y-4 mt-3">
       <p className="text-xs text-zinc-500">Custom fields for <span className="text-indigo-400">{ctype.name}</span>{bulk&&<span className="ml-2 text-zinc-600">· will apply to all {validBulkCount} clients</span>}</p>
-      {ctype.fields.filter(f=>f.active&&(f.requiredAt==="create"||f.requiredAt==="optional")).map(f=>{
+      {ctype.fields.filter(f=>f.active&&(requiredAtHas(f.requiredAt,"create")||requiredAtIsOptional(f.requiredAt))).map(f=>{
         if(f.conditionalOn&&fields[f.conditionalOn.key]!==f.conditionalOn.value) return null;
-        return <FG key={f.key} label={f.label} req={f.requiredAt==="create"}>
+        return <FG key={f.key} label={f.label} req={requiredAtHas(f.requiredAt,"create")}>
           {f.type==="dropdown"?<FSel value={fields[f.key]||""} onChange={v=>setFields(p=>({...p,[f.key]:v}))} opts={f.options||[]}/>
           :f.type==="textarea"?<FTa value={fields[f.key]||""} onChange={v=>setFields(p=>({...p,[f.key]:v}))}/>
           :f.type==="boolean"?<label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={!!fields[f.key]} onChange={e=>setFields(p=>({...p,[f.key]:String(e.target.checked)}))} className="accent-indigo-500"/><span className="text-xs text-zinc-400">{f.label}</span></label>
@@ -1474,10 +1486,12 @@ function FlowBuilder({caseTypeId,allRoles,allStatuses}:{caseTypeId:string;allRol
 }
 
 // ─── APPROVER TEMPLATES ───────────────────────────────────────────────────────
-function ApproverTemplates({caseTypeId,approvalRequired,allRoles}:{caseTypeId:string;approvalRequired:boolean;allRoles:Role[]}){
+function ApproverTemplates({caseTypeId,approvalRequired,allRoles,allUsers}:{caseTypeId:string;approvalRequired:boolean;allRoles:Role[];allUsers:UserInfo[]}){
   const [approvers,setApprovers]=useState<ApproverTemplate[]>([]);
   const [loading,setLoading]=useState(true);
+  const [addMode,setAddMode]=useState<"role"|"user">("role");
   const [selectedRoleId,setSelectedRoleId]=useState("");
+  const [selectedUserEmail,setSelectedUserEmail]=useState("");
   const [saving,setSaving]=useState(false);
   const [err,setErr]=useState("");
 
@@ -1492,18 +1506,30 @@ function ApproverTemplates({caseTypeId,approvalRequired,allRoles}:{caseTypeId:st
   useEffect(()=>{fetchApprovers();},[fetchApprovers]);
 
   async function addApprover(){
-    if(!selectedRoleId) return;
-    const role=allRoles.find(r=>r.id===selectedRoleId);
-    if(!role) return;
-    setSaving(true); setErr("");
-    try {
+    setErr("");
+    if(addMode==="role"){
+      if(!selectedRoleId){setErr("Select a role.");return;}
+      const role=allRoles.find(r=>r.id===selectedRoleId);
+      if(!role) return;
+      setSaving(true);
       const r=await fetch(`/api/admin/case-types/${caseTypeId}/approvers`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({roleId:selectedRoleId,displayName:role.name,role:role.name}),
       });
       if(r.ok){setSelectedRoleId("");fetchApprovers();}
       else{const d=await r.json();setErr(d.error||"Failed");}
-    } catch(e){setErr(String(e));}
+    } else {
+      if(!selectedUserEmail){setErr("Select a user.");return;}
+      const user=allUsers.find(u=>u.email===selectedUserEmail);
+      if(!user) return;
+      setSaving(true);
+      const r=await fetch(`/api/admin/case-types/${caseTypeId}/approvers`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({displayName:user.displayName||user.email,role:user.email,userEmail:user.email}),
+      });
+      if(r.ok){setSelectedUserEmail("");fetchApprovers();}
+      else{const d=await r.json();setErr(d.error||"Failed");}
+    }
     setSaving(false);
   }
 
@@ -1513,33 +1539,73 @@ function ApproverTemplates({caseTypeId,approvalRequired,allRoles}:{caseTypeId:st
   }
 
   const assignedRoleIds=new Set(approvers.map(a=>a.roleId).filter(Boolean));
+  const assignedNames=new Set(approvers.map(a=>a.name));
   const availableRoles=allRoles.filter(r=>!assignedRoleIds.has(r.id));
+  const availableUsers=allUsers.filter(u=>!assignedNames.has(u.displayName||u.email)&&!assignedNames.has(u.email));
 
-  if(!approvalRequired) return <p className="text-[10px] text-zinc-600 mt-1">Enable "Approval Required" on this case type to configure approval levels.</p>;
+  if(!approvalRequired) return <p className="text-[10px] text-zinc-600 mt-1">Enable "Approval Required" in Settings to configure approval levels.</p>;
   if(loading) return <div className="py-2 flex"><Spinner/></div>;
 
-  return <div className="space-y-2">
-    <p className="text-[10px] text-zinc-500">Each level is an ordered gate. All must approve before the case can close. Users with the linked role see the case highlighted in their queue.</p>
+  return <div className="space-y-3">
+    <p className="text-[10px] text-zinc-500">Ordered approval chain — all levels must approve before the case can close. Role-based approvers highlight the case for every user who holds that role.</p>
     {err&&<ErrBox msg={err}/>}
-    {approvers.length===0&&<p className="text-[10px] text-zinc-600">No approval levels configured. Add roles below to define the approval chain.</p>}
+
+    {/* Existing levels */}
+    {approvers.length===0&&<p className="text-[10px] text-zinc-600 italic">No approval levels yet. Add a role or user below.</p>}
     {approvers.map((a,i)=><div key={a.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 px-3 py-2.5 bg-zinc-950/30">
-      <span className="text-[10px] text-zinc-600 w-5 text-center font-mono font-bold">{i+1}</span>
+      <span className="text-[10px] text-zinc-500 w-5 text-center font-mono font-bold">{i+1}</span>
       <div className="flex-1 min-w-0 flex items-center gap-2">
-        <RoleBadge name={a.name} color={a.roleColor}/>
-        {!a.roleId&&<span className="text-[10px] text-zinc-600">(legacy — no role linked)</span>}
+        {a.roleId
+          ?<RoleBadge name={a.name} color={a.roleColor}/>
+          :<span className="flex items-center gap-1.5 text-[10px] text-zinc-300">
+            <Users className="w-3 h-3 text-zinc-500 shrink-0"/>
+            {a.name}
+            <span className="text-zinc-600 text-[9px]">(user)</span>
+          </span>
+        }
       </div>
-      <button onClick={()=>removeApprover(a.id)} className="text-zinc-600 hover:text-red-400 cursor-pointer p-1 rounded hover:bg-zinc-800 transition-colors">
+      <button onClick={()=>removeApprover(a.id)} className="text-zinc-600 hover:text-red-400 cursor-pointer p-1 rounded hover:bg-zinc-800 transition-colors" title="Remove level">
         <X className="w-3 h-3"/>
       </button>
     </div>)}
-    <div className="flex gap-2 mt-2 pt-2 border-t border-zinc-800/60">
-      <select value={selectedRoleId} onChange={e=>setSelectedRoleId(e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
-        <option value="">Select role for next approval level…</option>
-        {availableRoles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
-      </select>
-      <Button onClick={addApprover} disabled={saving||!selectedRoleId} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3 shrink-0 disabled:opacity-50">
-        {saving?<Spinner/>:<Plus className="w-3.5 h-3.5"/>}
-      </Button>
+
+    {/* Add form */}
+    <div className="rounded-lg border border-dashed border-zinc-700 p-3 space-y-2.5">
+      <p className="text-[10px] font-medium text-zinc-400">Add Approval Level</p>
+
+      {/* Mode toggle */}
+      <div className="flex gap-1 p-0.5 bg-zinc-800 rounded-lg w-fit">
+        {(["role","user"] as const).map(m=><button key={m} onClick={()=>{setAddMode(m);setSelectedRoleId("");setSelectedUserEmail("");setErr("");}}
+          className={`px-3 py-1 text-[10px] font-medium rounded-md cursor-pointer transition-all capitalize ${addMode===m?"bg-indigo-600 text-white":"text-zinc-400 hover:text-zinc-200"}`}>
+          {m==="role"?"By Role":"By User"}
+        </button>)}
+      </div>
+
+      {/* Role selector */}
+      {addMode==="role"&&<div className="flex gap-2">
+        <select value={selectedRoleId} onChange={e=>setSelectedRoleId(e.target.value)}
+          className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+          <option value="">Select role…</option>
+          {availableRoles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+        {availableRoles.length===0&&!selectedRoleId&&<p className="text-[10px] text-zinc-600 self-center">All roles already added</p>}
+        <Button onClick={addApprover} disabled={saving||!selectedRoleId} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3 shrink-0 disabled:opacity-50">
+          {saving?<Spinner/>:<><Plus className="w-3 h-3 mr-1"/>Add</>}
+        </Button>
+      </div>}
+
+      {/* User selector */}
+      {addMode==="user"&&<div className="flex gap-2">
+        <select value={selectedUserEmail} onChange={e=>setSelectedUserEmail(e.target.value)}
+          className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+          <option value="">Select user…</option>
+          {availableUsers.map(u=><option key={u.email} value={u.email}>{u.displayName||u.email} ({u.email})</option>)}
+        </select>
+        {availableUsers.length===0&&!selectedUserEmail&&<p className="text-[10px] text-zinc-600 self-center">All users already added</p>}
+        <Button onClick={addApprover} disabled={saving||!selectedUserEmail} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3 shrink-0 disabled:opacity-50">
+          {saving?<Spinner/>:<><Plus className="w-3 h-3 mr-1"/>Add</>}
+        </Button>
+      </div>}
     </div>
   </div>;
 }
@@ -1548,67 +1614,136 @@ function ApproverTemplates({caseTypeId,approvalRequired,allRoles}:{caseTypeId:st
 function FieldForm({caseTypeId,existing,allFields,onDone,onCancel}:{caseTypeId:string;existing?:CustomField;allFields:CustomField[];onDone:()=>void;onCancel:()=>void}){
   const [label,setLabel]=useState(existing?.label??"");
   const [key,setKey]=useState(existing?.key??"");
+  const [keyTouched,setKeyTouched]=useState(!!existing);
   const [type,setType]=useState(existing?.type??"text");
-  const [requiredAt,setRequiredAt]=useState(existing?.requiredAt??"optional");
+  // Multi-stage required-at: set of "create"|"complete"|"close"
+  const initStages=():Set<string>=>{
+    const ra=existing?.requiredAt??"optional";
+    if(!ra||ra==="optional") return new Set();
+    return new Set(ra.split(",").map(s=>s.trim()).filter(s=>REQUIRED_AT_STAGES.includes(s as never)));
+  };
+  const [reqStages,setReqStages]=useState<Set<string>>(initStages);
   const [optionsRaw,setOptionsRaw]=useState((existing?.options??[]).join(", "));
   const [condKey,setCondKey]=useState(existing?.conditionalOn?.key??"");
   const [condVal,setCondVal]=useState(existing?.conditionalOn?.value??"");
   const [saving,setSaving]=useState(false);
   const [err,setErr]=useState("");
+  const [fieldErrs,setFieldErrs]=useState<Record<string,string>>({});
 
   function derivedKey(lbl:string){return lbl.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");}
 
+  function toggleStage(stage:string){
+    setReqStages(prev=>{const n=new Set(prev);n.has(stage)?n.delete(stage):n.add(stage);return n;});
+  }
+
+  function validate():{ok:boolean;errs:Record<string,string>}{
+    const errs:Record<string,string>={};
+    if(!label.trim()) errs.label="Label is required";
+    else if(label.trim().length>80) errs.label="Max 80 characters";
+    if(!key.trim()) errs.key="Key is required";
+    else if(!/^[a-z][a-z0-9_]*$/.test(key.trim())) errs.key="Must be snake_case: lowercase letters, digits, underscores; start with a letter";
+    else if(key.trim().length>60) errs.key="Max 60 characters";
+    else if(!existing){
+      const dup=allFields.find(f=>f.key===key.trim());
+      if(dup) errs.key=`Key "${key.trim()}" already exists on this case type`;
+    }
+    if(type==="dropdown"){
+      const opts=optionsRaw.split(",").map(s=>s.trim()).filter(Boolean);
+      if(opts.length<2) errs.options="Dropdown requires at least 2 options";
+    }
+    if(condKey&&!condVal.trim()) errs.condVal="Enter the value to match";
+    return {ok:Object.keys(errs).length===0,errs};
+  }
+
   async function save(){
-    if(!label.trim()||!key.trim()){setErr("Label and key are required.");return;}
-    setSaving(true); setErr("");
-    const body:{label:string;key?:string;type:string;requiredAt:string;options:string[];conditionalOn:{key:string;value:string}|null}={
-      label:label.trim(), type,
-      requiredAt,
+    const {ok,errs}=validate();
+    if(!ok){setFieldErrs(errs);setErr("Please fix the errors above.");return;}
+    setFieldErrs({});setErr("");setSaving(true);
+    const requiredAt=reqStages.size>0?[...reqStages].join(","):"optional";
+    const body={
+      label:label.trim(), type, requiredAt,
       options:type==="dropdown"?optionsRaw.split(",").map(s=>s.trim()).filter(Boolean):[],
-      conditionalOn:condKey&&condVal?{key:condKey,value:condVal}:null,
+      conditionalOn:condKey&&condVal.trim()?{key:condKey,value:condVal.trim()}:null,
     };
     try {
-      let r;
-      if(existing?.id){
-        r=await fetch(`/api/admin/case-types/${caseTypeId}/fields/${existing.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-      } else {
-        r=await fetch(`/api/admin/case-types/${caseTypeId}/fields`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...body,key:key.trim()})});
-      }
+      const r=existing?.id
+        ? await fetch(`/api/admin/case-types/${caseTypeId}/fields/${existing.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+        : await fetch(`/api/admin/case-types/${caseTypeId}/fields`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...body,key:key.trim()})});
       if(!r.ok){const d=await r.json();setErr(d.error||"Failed");setSaving(false);return;}
       onDone();
     } catch(e){setErr(String(e));setSaving(false);}
   }
 
-  return <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-4 space-y-3 mt-2">
-    <p className="text-xs font-semibold text-indigo-400">{existing?"Edit Field":"Add Field"}</p>
+  const STAGE_META:{id:string;label:string;color:string}[]=[
+    {id:"create",  label:"On Create",  color:"bg-red-500/20 text-red-300 border-red-500/40"},
+    {id:"complete",label:"On Complete",color:"bg-amber-500/20 text-amber-300 border-amber-500/40"},
+    {id:"close",   label:"On Close",   color:"bg-orange-500/20 text-orange-300 border-orange-500/40"},
+  ];
+
+  return <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-4 space-y-4 mt-2">
+    <p className="text-xs font-semibold text-indigo-400">{existing?"Edit Field":"New Field"}</p>
     {err&&<ErrBox msg={err}/>}
+
+    {/* Label + Key */}
     <div className="grid grid-cols-2 gap-3">
-      <FG label="Label" req><FIn value={label} onChange={v=>{setLabel(v);if(!existing)setKey(derivedKey(v));}} placeholder="e.g. Alert Type"/></FG>
-      <FG label="Key (snake_case)" req><FIn value={key} onChange={setKey} placeholder="alert_type" disabled={!!existing}/></FG>
-    </div>
-    <div className="grid grid-cols-2 gap-3">
-      <FG label="Field Type">
-        <select value={type} onChange={e=>setType(e.target.value as CustomField["type"])} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
-          {FIELD_TYPES.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
+      <FG label="Label" req err={fieldErrs.label}>
+        <FIn value={label} onChange={v=>{setLabel(v);if(!keyTouched)setKey(derivedKey(v));}} placeholder="e.g. Alert Type"
+          className={fieldErrs.label?"border-red-500":undefined}/>
       </FG>
-      <FG label="Required At">
-        <select value={requiredAt} onChange={e=>setRequiredAt(e.target.value as CustomField["requiredAt"])} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
-          {REQUIRED_AT_OPTS.map(o=><option key={o} value={o}>{o}</option>)}
-        </select>
+      <FG label="Key (snake_case)" req err={fieldErrs.key}>
+        <FIn value={key} onChange={v=>{setKey(v);setKeyTouched(true);}} placeholder="alert_type" disabled={!!existing}
+          className={fieldErrs.key?"border-red-500":undefined}/>
+        {!existing&&key&&!/^[a-z][a-z0-9_]*$/.test(key)&&!fieldErrs.key&&
+          <p className="text-[10px] text-amber-400 mt-0.5">Must be snake_case</p>}
       </FG>
     </div>
-    {type==="dropdown"&&<FG label="Options (comma-separated)"><FIn value={optionsRaw} onChange={setOptionsRaw} placeholder="Option A, Option B, Option C"/></FG>}
+
+    {/* Type */}
+    <FG label="Field Type">
+      <select value={type} onChange={e=>setType(e.target.value as CustomField["type"])} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+        {FIELD_TYPES.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
+      </select>
+    </FG>
+
+    {/* Dropdown options */}
+    {type==="dropdown"&&<FG label="Options (comma-separated)" req err={fieldErrs.options}>
+      <FIn value={optionsRaw} onChange={setOptionsRaw} placeholder="Option A, Option B, Option C"
+        className={fieldErrs.options?"border-red-500":undefined}/>
+      {optionsRaw&&<p className="text-[10px] text-zinc-500 mt-0.5">{optionsRaw.split(",").map(s=>s.trim()).filter(Boolean).length} option(s)</p>}
+    </FG>}
+
+    {/* Required At — multi-select chips */}
+    <FG label="Required At">
+      <div className="flex items-center gap-2 flex-wrap">
+        {STAGE_META.map(s=>{
+          const on=reqStages.has(s.id);
+          return <button key={s.id} type="button" onClick={()=>toggleStage(s.id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium cursor-pointer transition-all ${on?s.color:"bg-zinc-800/60 border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
+            <span className={`w-3 h-3 rounded border flex items-center justify-center shrink-0 ${on?"bg-current border-current":"border-zinc-600"}`}>
+              {on&&<Check className="w-2 h-2 text-zinc-950"/>}
+            </span>
+            {s.label}
+          </button>;
+        })}
+        {reqStages.size===0&&<span className="text-[11px] text-zinc-600 italic">Optional — not required at any stage</span>}
+      </div>
+    </FG>
+
+    {/* Conditional visibility */}
     <div className="grid grid-cols-2 gap-3">
       <FG label="Show only when field…">
-        <select value={condKey} onChange={e=>setCondKey(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+        <select value={condKey} onChange={e=>{setCondKey(e.target.value);if(!e.target.value)setCondVal("");}} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
           <option value="">Always show</option>
-          {allFields.filter(f=>f.key!==key).map(f=><option key={f.key} value={f.key}>{f.label}</option>)}
+          {allFields.filter(f=>f.key!==key&&f.active).map(f=><option key={f.key} value={f.key}>{f.label} ({f.key})</option>)}
         </select>
       </FG>
-      {condKey&&<FG label="…equals"><FIn value={condVal} onChange={setCondVal} placeholder="value"/></FG>}
+      {condKey&&<FG label="…equals" req err={fieldErrs.condVal}>
+        <FIn value={condVal} onChange={setCondVal} placeholder="value to match"
+          className={fieldErrs.condVal?"border-red-500":undefined}/>
+      </FG>}
     </div>
-    <div className="flex gap-2 pt-1">
+
+    <div className="flex gap-2 pt-1 border-t border-indigo-500/20">
       <Button variant="outline" onClick={onCancel} className="border-zinc-700 text-zinc-400 h-7 text-xs px-3">Cancel</Button>
       <Button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-7 text-xs px-4 disabled:opacity-50">
         {saving?<span className="flex items-center gap-1.5"><Spinner/>{existing?"Saving…":"Adding…"}</span>:existing?"Save Changes":"Add Field"}
@@ -1723,7 +1858,7 @@ function CaseTypeModal({existing,allRoles,onClose,onSaved}:{existing?:CaseType|n
 }
 
 // ─── CASE TYPES PANEL ─────────────────────────────────────────────────────────
-function CaseTypesPanel({caseTypes,allRoles,allStatuses,onRefresh}:{caseTypes:CaseType[];allRoles:Role[];allStatuses:AppStatus[];onRefresh:()=>void}){
+function CaseTypesPanel({caseTypes,allRoles,allStatuses,allUsers,onRefresh}:{caseTypes:CaseType[];allRoles:Role[];allStatuses:AppStatus[];allUsers:UserInfo[];onRefresh:()=>void}){
   const [exp,setExp]=useState<string|null>(null);
   const [expSection,setExpSection]=useState<"fields"|"flow"|"approvers">("fields");
   const [showCreate,setShowCreate]=useState(false);
@@ -1873,7 +2008,7 @@ function CaseTypesPanel({caseTypes,allRoles,allStatuses,onRefresh}:{caseTypes:Ca
                     <td className="py-1.5 pr-3 text-zinc-200">{f.label}</td>
                     <td className="py-1.5 pr-3 text-zinc-400">{FIELD_TYPES.find(ft=>ft.value===f.type)?.label??f.type}</td>
                     <td className="py-1.5 pr-3">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${f.requiredAt==="create"?"bg-red-500/15 text-red-300":f.requiredAt==="complete"?"bg-amber-500/15 text-amber-300":f.requiredAt==="close"?"bg-orange-500/15 text-orange-300":"bg-zinc-800 text-zinc-500"}`}>{f.requiredAt}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${requiredAtIsOptional(f.requiredAt)?"bg-zinc-800 text-zinc-500":requiredAtHas(f.requiredAt,"create")?"bg-red-500/15 text-red-300":requiredAtHas(f.requiredAt,"close")?"bg-orange-500/15 text-orange-300":"bg-amber-500/15 text-amber-300"}`}>{requiredAtLabel(f.requiredAt)}</span>
                     </td>
                     <td className="py-1.5 pr-3 text-zinc-500 text-[10px]">
                       {f.type==="dropdown"&&f.options?.length?(f.options.slice(0,3).join(", ")+(f.options.length>3?` +${f.options.length-3}`:"")):""}
@@ -1898,7 +2033,7 @@ function CaseTypesPanel({caseTypes,allRoles,allStatuses,onRefresh}:{caseTypes:Ca
 
           {/* Approval Levels section */}
           {expSection==="approvers"&&<div className="mt-4">
-            <ApproverTemplates caseTypeId={t.id} approvalRequired={t.approvalRequired} allRoles={allRoles}/>
+            <ApproverTemplates caseTypeId={t.id} approvalRequired={t.approvalRequired} allRoles={allRoles} allUsers={allUsers}/>
           </div>}
 
         </div>}
@@ -2019,7 +2154,7 @@ function CasesInner(){
 
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {tab==="analytics"&&<AnalyticsPanel/>}
-      {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes} allRoles={allRoles} allStatuses={allStatuses} onRefresh={()=>{fetchCaseTypes();fetchCases();}}/>}
+      {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes} allRoles={allRoles} allStatuses={allStatuses} allUsers={allUsers} onRefresh={()=>{fetchCaseTypes();fetchCases();}}/>}
       {tab==="statuses"&&<StatusesPanel allStatuses={allStatuses} onRefresh={fetchStatuses}/>}
       {tab==="roles"&&<RolesPanel allUsers={allUsers}/>}
       {tab==="departments"&&<DepartmentsPanel allRoles={allRoles} allUsers={allUsers}/>}
