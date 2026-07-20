@@ -5,7 +5,7 @@ import {
   Plus, Search, X, Download, Clock, CheckCircle, AlertTriangle,
   ArrowRight, Paperclip, Send, Eye, FileText, AlertCircle, Check,
   XCircle, ArrowLeftRight, ChevronDown, ChevronRight, Inbox, Upload,
-  Users,
+  Users, Pencil, Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { DashNav } from "@/components/dash-nav";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
-type CaseStatus = "new"|"active"|"rfi"|"handoff"|"complete"|"reject"|"pending_approval"|"closed";
+type CaseStatus = string;
+interface AppStatus { id: string; label: string; color: string; description: string; isSystem: boolean; sortOrder: number }
 type License = "UK"|"CA"|"MT"|"ALL";
 type Department = "AML"|"Onboarding"|"Compliance"|"Settlements"|"Fraud";
 
@@ -105,9 +106,15 @@ const FIELD_TYPES = [
 const REQUIRED_AT_OPTS = ["create","complete","close","optional"];
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
-function StatusBadge({status}:{status:CaseStatus}){
-  const m=STATUS_META[status]; if(!m) return null;
-  return <Badge variant="outline" className={`text-[10px] font-semibold whitespace-nowrap ${m.color}`}>{m.label}</Badge>;
+function StatusBadge({status,allStatuses}:{status:CaseStatus;allStatuses?:AppStatus[]}){
+  const system=STATUS_META[status];
+  if(system) return <Badge variant="outline" className={`text-[10px] font-semibold whitespace-nowrap ${system.color}`}>{system.label}</Badge>;
+  const custom=allStatuses?.find(s=>s.id===status);
+  if(custom){
+    const cls=COLOR_CLASSES[custom.color]??"bg-indigo-500/15 text-indigo-400 border-indigo-500/30";
+    return <Badge variant="outline" className={`text-[10px] font-semibold whitespace-nowrap ${cls}`}>{custom.label}</Badge>;
+  }
+  return <Badge variant="outline" className="text-[10px] font-semibold whitespace-nowrap bg-zinc-500/15 text-zinc-400 border-zinc-600">{status}</Badge>;
 }
 function LicBadge({lic}:{lic:string}){
   const c=lic==="UK"?"bg-blue-500/15 text-blue-300 border-blue-500/30":lic==="CA"?"bg-red-500/15 text-red-300 border-red-500/30":lic==="MT"?"bg-amber-500/15 text-amber-300 border-amber-500/30":"bg-zinc-500/15 text-zinc-400 border-zinc-600";
@@ -1059,6 +1066,156 @@ function DepartmentsPanel({allRoles,allUsers}:{allRoles:Role[];allUsers:UserInfo
   </>;
 }
 
+// ─── STATUSES PANEL ───────────────────────────────────────────────────────────
+function StatusesPanel({allStatuses,onRefresh}:{allStatuses:AppStatus[];onRefresh:()=>void}){
+  const [showCreate,setShowCreate]=useState(false);
+  const [newLabel,setNewLabel]=useState("");
+  const [newColor,setNewColor]=useState("indigo");
+  const [newDesc,setNewDesc]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState("");
+  const [editId,setEditId]=useState<string|null>(null);
+  const [editLabel,setEditLabel]=useState("");
+  const [editColor,setEditColor]=useState("indigo");
+  const [editDesc,setEditDesc]=useState("");
+  const [deletingId,setDeletingId]=useState<string|null>(null);
+
+  async function create(){
+    if(!newLabel.trim())return;
+    setSaving(true);setErr("");
+    const r=await fetch("/api/admin/case-statuses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({label:newLabel.trim(),color:newColor,description:newDesc})});
+    if(r.ok){setShowCreate(false);setNewLabel("");setNewColor("indigo");setNewDesc("");onRefresh();}
+    else{const d=await r.json();setErr(d.error||"Failed");}
+    setSaving(false);
+  }
+
+  function startEdit(s:AppStatus){
+    setEditId(s.id);setEditLabel(s.label);setEditColor(s.color);setEditDesc(s.description);setErr("");
+  }
+
+  async function saveEdit(){
+    if(!editId||!editLabel.trim())return;
+    setSaving(true);setErr("");
+    const r=await fetch(`/api/admin/case-statuses/${editId}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({label:editLabel.trim(),color:editColor,description:editDesc})});
+    if(r.ok){setEditId(null);onRefresh();}
+    else{const d=await r.json();setErr(d.error||"Failed");}
+    setSaving(false);
+  }
+
+  async function deleteStatus(id:string){
+    setDeletingId(id);setErr("");
+    const r=await fetch(`/api/admin/case-statuses/${id}`,{method:"DELETE"});
+    if(r.ok){onRefresh();}
+    else{const d=await r.json();setErr(d.error||"Failed");}
+    setDeletingId(null);
+  }
+
+  const system=allStatuses.filter(s=>s.isSystem);
+  const custom=allStatuses.filter(s=>!s.isSystem);
+
+  return <div className="space-y-6">
+    {/* Header */}
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-sm font-semibold text-white">Case Statuses</p>
+        <p className="text-xs text-zinc-500 mt-0.5">System statuses are built-in. Custom statuses can be used in any case type flow.</p>
+      </div>
+      <Button onClick={()=>{setShowCreate(true);setErr("");}} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex items-center gap-1.5">
+        <Plus className="w-3.5 h-3.5"/>New Status
+      </Button>
+    </div>
+
+    {err&&<p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{err}</p>}
+
+    {/* Create form */}
+    {showCreate&&<div className="rounded-xl border border-zinc-700 bg-zinc-900/60 p-4 space-y-3">
+      <p className="text-xs font-semibold text-zinc-300">New Status</p>
+      <div className="flex gap-2 flex-wrap">
+        <input
+          value={newLabel} onChange={e=>setNewLabel(e.target.value)}
+          placeholder="Status name (e.g. Under Review)"
+          className="flex-1 min-w-48 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+          onKeyDown={e=>e.key==="Enter"&&create()}
+          autoFocus
+        />
+        <select value={newColor} onChange={e=>setNewColor(e.target.value)} className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+          {ROLE_COLORS.map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+        </select>
+      </div>
+      <input
+        value={newDesc} onChange={e=>setNewDesc(e.target.value)}
+        placeholder="Description (optional)"
+        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+      />
+      <div className="flex gap-2">
+        <Button onClick={create} disabled={saving||!newLabel.trim()} className="bg-indigo-600 hover:bg-indigo-700 h-7 text-xs px-4 disabled:opacity-50">
+          {saving?<Spinner/>:"Create"}
+        </Button>
+        <Button variant="ghost" onClick={()=>setShowCreate(false)} className="h-7 text-xs text-zinc-400 hover:text-white">Cancel</Button>
+      </div>
+    </div>}
+
+    {/* System statuses */}
+    <div>
+      <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">System Statuses</p>
+      <div className="rounded-xl border border-zinc-800 divide-y divide-zinc-800/60">
+        {system.map(s=>{
+          const cls=COLOR_CLASSES[s.color]??"bg-indigo-500/15 text-indigo-400 border-indigo-500/30";
+          return <div key={s.id} className="flex items-center gap-3 px-4 py-3">
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[10px] font-semibold ${cls}`}>{s.label}</span>
+            <span className="text-[10px] text-zinc-600 font-mono">{s.id}</span>
+            {s.description&&<span className="text-[10px] text-zinc-500 flex-1">{s.description}</span>}
+            <span className="text-[10px] text-zinc-700 ml-auto">system</span>
+          </div>;
+        })}
+      </div>
+    </div>
+
+    {/* Custom statuses */}
+    <div>
+      <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Custom Statuses</p>
+      {custom.length===0&&<p className="text-xs text-zinc-600 italic py-2">No custom statuses yet. Create one above.</p>}
+      {custom.length>0&&<div className="rounded-xl border border-zinc-800 divide-y divide-zinc-800/60">
+        {custom.map(s=>{
+          const cls=COLOR_CLASSES[s.color]??"bg-indigo-500/15 text-indigo-400 border-indigo-500/30";
+          const isEditing=editId===s.id;
+          return <div key={s.id} className="px-4 py-3">
+            {isEditing
+              ?<div className="space-y-2">
+                <div className="flex gap-2 flex-wrap">
+                  <input value={editLabel} onChange={e=>setEditLabel(e.target.value)} className="flex-1 min-w-36 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"/>
+                  <select value={editColor} onChange={e=>setEditColor(e.target.value)} className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+                    {ROLE_COLORS.map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+                  </select>
+                </div>
+                <input value={editDesc} onChange={e=>setEditDesc(e.target.value)} placeholder="Description (optional)" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500"/>
+                <div className="flex gap-2">
+                  <Button onClick={saveEdit} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-6 text-[10px] px-3 disabled:opacity-50">{saving?<Spinner/>:"Save"}</Button>
+                  <Button variant="ghost" onClick={()=>setEditId(null)} className="h-6 text-[10px] text-zinc-500 hover:text-white">Cancel</Button>
+                </div>
+              </div>
+              :<div className="flex items-center gap-3">
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[10px] font-semibold ${cls}`}>{s.label}</span>
+                <span className="text-[10px] text-zinc-600 font-mono">{s.id}</span>
+                {s.description&&<span className="text-[10px] text-zinc-500 flex-1 truncate">{s.description}</span>}
+                <div className="flex items-center gap-1 ml-auto">
+                  <button onClick={()=>startEdit(s)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer p-1 rounded hover:bg-zinc-800 transition-colors" title="Edit"><Pencil className="w-3 h-3"/></button>
+                  <button
+                    onClick={()=>deleteStatus(s.id)}
+                    disabled={deletingId===s.id}
+                    className="text-zinc-600 hover:text-red-400 cursor-pointer p-1 rounded hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                    title="Delete"
+                  >{deletingId===s.id?<Spinner/>:<Trash2 className="w-3 h-3"/>}</button>
+                </div>
+              </div>
+            }
+          </div>;
+        })}
+      </div>}
+    </div>
+  </div>;
+}
+
 // ─── ANALYTICS PANEL ──────────────────────────────────────────────────────────
 function AnalyticsPanel(){
   const [data,setData]=useState<Record<string,unknown>|null>(null);
@@ -1101,7 +1258,7 @@ function AnalyticsPanel(){
 }
 
 // ─── FLOW BUILDER ─────────────────────────────────────────────────────────────
-function FlowBuilder({caseTypeId,allRoles}:{caseTypeId:string;allRoles:Role[]}){
+function FlowBuilder({caseTypeId,allRoles,allStatuses}:{caseTypeId:string;allRoles:Role[];allStatuses:AppStatus[]}){
   const [transitions,setTransitions]=useState<FlowTransition[]>([]);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
@@ -1189,41 +1346,43 @@ function FlowBuilder({caseTypeId,allRoles}:{caseTypeId:string;allRoles:Role[]}){
     </div>
 
     {/* ── Enable/Disable Matrix ── */}
-    <div className="overflow-x-auto rounded-lg border border-zinc-800">
-      <table className="text-[10px] w-full">
-        <thead>
-          <tr className="bg-zinc-950/60 border-b border-zinc-800">
-            <th className="px-3 py-2 text-left text-zinc-500 font-medium w-28 whitespace-nowrap">From ↓ · To →</th>
-            {ALL_STATUSES.map(s=><th key={s} className="px-2 py-2 text-center text-zinc-500 font-medium whitespace-nowrap">{STATUS_META[s]?.label??s}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {ALL_STATUSES.map(from=><tr key={from} className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/10">
-            <td className="px-3 py-2 text-zinc-300 font-medium whitespace-nowrap">{STATUS_META[from]?.label??from}</td>
-            {ALL_STATUSES.map(to=>{
-              const en=isEnabled(from as CaseStatus,to as CaseStatus);
-              const tx=getTx(from as CaseStatus,to as CaseStatus);
-              return <td key={to} className="px-2 py-1.5 text-center">
-                {from===to
-                  ?<span className="text-zinc-800">—</span>
-                  :<div className="flex flex-col items-center gap-0.5">
-                    <button
-                      onClick={()=>toggle(from as CaseStatus,to as CaseStatus)}
-                      className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition-all ${en?"bg-indigo-500 border-indigo-400 text-white":"border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800"}`}
-                    >{en&&<Check className="w-2.5 h-2.5"/>}</button>
-                    {/* indicators below the checkbox */}
-                    {en&&tx&&<div className="flex gap-0.5 mt-0.5">
-                      {tx.requiresReason&&<span className="text-amber-400 text-[8px] leading-none" title="Requires reason">✱</span>}
-                      {tx.notifyRoles.length>0&&<span className="text-indigo-400 text-[8px] leading-none" title={`Notifies ${tx.notifyRoles.length} role(s)`}>●</span>}
-                    </div>}
-                  </div>
-                }
-              </td>;
-            })}
-          </tr>)}
-        </tbody>
-      </table>
-    </div>
+    {allStatuses.length===0
+      ?<p className="text-xs text-zinc-600 text-center py-6">No statuses available. Go to the Statuses tab to create some.</p>
+      :<div className="overflow-x-auto rounded-lg border border-zinc-800">
+        <table className="text-[10px] w-full">
+          <thead>
+            <tr className="bg-zinc-950/60 border-b border-zinc-800">
+              <th className="px-3 py-2 text-left text-zinc-500 font-medium w-28 whitespace-nowrap">From ↓ · To →</th>
+              {allStatuses.map(s=><th key={s.id} className="px-2 py-2 text-center text-zinc-500 font-medium whitespace-nowrap">{s.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {allStatuses.map(fromS=><tr key={fromS.id} className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/10">
+              <td className="px-3 py-2 text-zinc-300 font-medium whitespace-nowrap">{fromS.label}</td>
+              {allStatuses.map(toS=>{
+                const en=isEnabled(fromS.id,toS.id);
+                const tx=getTx(fromS.id,toS.id);
+                return <td key={toS.id} className="px-2 py-1.5 text-center">
+                  {fromS.id===toS.id
+                    ?<span className="text-zinc-800">—</span>
+                    :<div className="flex flex-col items-center gap-0.5">
+                      <button
+                        onClick={()=>toggle(fromS.id,toS.id)}
+                        className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition-all ${en?"bg-indigo-500 border-indigo-400 text-white":"border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800"}`}
+                      >{en&&<Check className="w-2.5 h-2.5"/>}</button>
+                      {en&&tx&&<div className="flex gap-0.5 mt-0.5">
+                        {tx.requiresReason&&<span className="text-amber-400 text-[8px] leading-none" title="Requires reason">✱</span>}
+                        {tx.notifyRoles.length>0&&<span className="text-indigo-400 text-[8px] leading-none" title={`Notifies ${tx.notifyRoles.length} role(s)`}>●</span>}
+                      </div>}
+                    </div>
+                  }
+                </td>;
+              })}
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+    }
 
     {/* ── Transition Settings ── */}
     {enabledTransitions.length>0&&<div>
@@ -1239,9 +1398,9 @@ function FlowBuilder({caseTypeId,allRoles}:{caseTypeId:string;allRoles:Role[]}){
           return <div key={k} className="px-4 py-3 space-y-2">
             {/* Row header */}
             <div className="flex items-center gap-2 flex-wrap">
-              <StatusBadge status={tx.from}/>
+              <StatusBadge status={tx.from} allStatuses={allStatuses}/>
               <ArrowRight className="w-3 h-3 text-zinc-600 shrink-0"/>
-              <StatusBadge status={tx.to}/>
+              <StatusBadge status={tx.to} allStatuses={allStatuses}/>
 
               {/* Requires reason toggle */}
               <label className="flex items-center gap-1.5 cursor-pointer ml-auto">
@@ -1564,7 +1723,7 @@ function CaseTypeModal({existing,allRoles,onClose,onSaved}:{existing?:CaseType|n
 }
 
 // ─── CASE TYPES PANEL ─────────────────────────────────────────────────────────
-function CaseTypesPanel({caseTypes,allRoles,onRefresh}:{caseTypes:CaseType[];allRoles:Role[];onRefresh:()=>void}){
+function CaseTypesPanel({caseTypes,allRoles,allStatuses,onRefresh}:{caseTypes:CaseType[];allRoles:Role[];allStatuses:AppStatus[];onRefresh:()=>void}){
   const [exp,setExp]=useState<string|null>(null);
   const [expSection,setExpSection]=useState<"fields"|"flow"|"approvers">("fields");
   const [showCreate,setShowCreate]=useState(false);
@@ -1734,7 +1893,7 @@ function CaseTypesPanel({caseTypes,allRoles,onRefresh}:{caseTypes:CaseType[];all
 
           {/* Status Flow section */}
           {expSection==="flow"&&<div className="mt-4">
-            <FlowBuilder caseTypeId={t.id} allRoles={allRoles}/>
+            <FlowBuilder caseTypeId={t.id} allRoles={allRoles} allStatuses={allStatuses}/>
           </div>}
 
           {/* Approval Levels section */}
@@ -1758,6 +1917,7 @@ function CasesInner(){
   const [allRoles,setAllRoles]=useState<Role[]>([]);
   const [myRoleIds,setMyRoleIds]=useState<string[]>([]);
   const [allUsers,setAllUsers]=useState<UserInfo[]>([]);
+  const [allStatuses,setAllStatuses]=useState<AppStatus[]>([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
   const [tab,setTab]=useState("cases");
@@ -1801,14 +1961,19 @@ function CasesInner(){
     fetch("/api/admin/roles?mine=true").then(async r=>{if(r.ok){const d=await r.json();setMyRoleIds((d.roles||[]).map((x:{id:string})=>x.id));}}).catch(()=>{});
   },[]);
 
+  const fetchStatuses=useCallback(()=>{
+    fetch("/api/admin/case-statuses").then(async r=>{if(r.ok){const d=await r.json();setAllStatuses(d.statuses||[]);}}).catch(()=>{});
+  },[]);
+
   useEffect(()=>{
     fetch("/api/auth/me").then(async r=>{if(r.status===401){router.push("/login");return;}const d=await r.json();setUser(d.user);});
     fetchCaseTypes();
     fetchRoles();
+    fetchStatuses();
     // load users for assignee picker
     fetch("/api/admin/users").then(async r=>{if(r.ok){const d=await r.json();setAllUsers((d.users||[]).map((u:{id:string;email:string;display_name?:string})=>({id:u.id,email:u.email,displayName:u.display_name||u.email})));}}).catch(()=>{});
     if(params?.get("create")==="true")setShowCreate(true);
-  },[router,params,fetchCaseTypes,fetchRoles]);
+  },[router,params,fetchCaseTypes,fetchRoles,fetchStatuses]);
 
   useEffect(()=>{fetchCases();},[fetchCases]);
 
@@ -1843,7 +2008,7 @@ function CasesInner(){
         </div>
       </div>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-0 overflow-x-auto" style={{scrollbarWidth:"none"}}>
-        {([["cases","Cases"],["analytics","Analytics"],["types","Case Types"],["roles","Roles"],["departments","Departments"]] as [string,string][]).map(([id,label])=>
+        {([["cases","Cases"],["analytics","Analytics"],["types","Case Types"],["statuses","Statuses"],["roles","Roles"],["departments","Departments"]] as [string,string][]).map(([id,label])=>
           <button key={id} onClick={()=>setTab(id)} data-testid={`tab-${id}`} className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 cursor-pointer transition-colors relative ${tab===id?"border-indigo-500 text-indigo-400":"border-transparent text-zinc-500 hover:text-zinc-300"}`}>
             {label}
             {id==="cases"&&myApprovalCount>0&&<span className="ml-1.5 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{myApprovalCount}</span>}
@@ -1854,7 +2019,8 @@ function CasesInner(){
 
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {tab==="analytics"&&<AnalyticsPanel/>}
-      {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes} allRoles={allRoles} onRefresh={()=>{fetchCaseTypes();fetchCases();}}/>}
+      {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes} allRoles={allRoles} allStatuses={allStatuses} onRefresh={()=>{fetchCaseTypes();fetchCases();}}/>}
+      {tab==="statuses"&&<StatusesPanel allStatuses={allStatuses} onRefresh={fetchStatuses}/>}
       {tab==="roles"&&<RolesPanel allUsers={allUsers}/>}
       {tab==="departments"&&<DepartmentsPanel allRoles={allRoles} allUsers={allUsers}/>}
       {tab==="cases"&&<>
