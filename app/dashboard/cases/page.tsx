@@ -20,11 +20,14 @@ type Department = "AML"|"Onboarding"|"Compliance"|"Settlements"|"Fraud";
 interface CaseType {
   id: string; name: string; department: Department; approvalRequired: boolean;
   fields: CustomField[]; active: boolean; triggerType: string; version: number;
+  sla?: { slaDays: number; escalationDays: number | null; escalateTo: string | null };
 }
 interface CustomField {
-  key: string; label: string; type: "text"|"textarea"|"dropdown"|"date"|"boolean"|"number";
-  required: boolean; requiredAt: "create"|"complete"|"close"|"optional";
-  options?: string[]; active: boolean; conditionalOn?: {key:string;value:string};
+  id?: string; key: string; label: string;
+  type: "text"|"textarea"|"dropdown"|"date"|"boolean"|"number"|"email"|"phone"|"url"|"currency";
+  required?: boolean; requiredAt: "create"|"complete"|"close"|"optional";
+  options?: string[]; active: boolean; conditionalOn?: {key:string;value:string}|null;
+  sortOrder?: number;
 }
 interface Approver {
   id: string; name: string; role?: string; status: "pending"|"approved"|"rejected";
@@ -172,7 +175,8 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
           {f.type==="dropdown"?<FSel value={fields[f.key]||""} onChange={v=>setFields(p=>({...p,[f.key]:v}))} opts={f.options||[]}/>
           :f.type==="textarea"?<FTa value={fields[f.key]||""} onChange={v=>setFields(p=>({...p,[f.key]:v}))}/>
           :f.type==="boolean"?<label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={!!fields[f.key]} onChange={e=>setFields(p=>({...p,[f.key]:String(e.target.checked)}))} className="accent-indigo-500"/><span className="text-xs text-zinc-400">{f.label}</span></label>
-          :<FIn value={fields[f.key]||""} onChange={v=>setFields(p=>({...p,[f.key]:v}))} type={f.type==="number"?"number":"text"}/>}
+          :<FIn value={fields[f.key]||""} onChange={v=>setFields(p=>({...p,[f.key]:v}))}
+              type={f.type==="number"||f.type==="currency"?"number":f.type==="email"?"email":f.type==="url"?"url":f.type==="date"?"date":"text"}/>}
         </FG>;
       })}
       {defaultTransactionId&&<div className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 p-3 text-xs text-indigo-300">Linked to transaction <span className="font-mono font-semibold">{defaultTransactionId}</span></div>}
@@ -550,36 +554,365 @@ function AnalyticsPanel(){
 }
 
 // ─── CASE TYPES PANEL ─────────────────────────────────────────────────────────
-function CaseTypesPanel({caseTypes}:{caseTypes:CaseType[]}){
-  const [exp,setExp]=useState<string|null>(null);
-  if(caseTypes.length===0)return <div className="text-zinc-600 text-xs text-center py-8">Loading case types… (ensure migration has been run)</div>;
-  return <div className="space-y-3">{caseTypes.map(t=><div key={t.id} className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
-    <div className="flex items-center justify-between px-5 py-3.5 cursor-pointer hover:bg-zinc-800/30" onClick={()=>setExp(exp===t.id?null:t.id)}>
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className={`w-2 h-2 rounded-full ${t.active?"bg-green-400":"bg-zinc-600"}`}/>
-        <p className="text-white text-sm font-semibold">{t.name}</p>
-        <DeptBadge dept={t.department}/>
-        {t.approvalRequired&&<Badge variant="outline" className="text-[10px] border-orange-500/30 text-orange-400">Approval Required</Badge>}
-        <Badge variant="outline" className="text-[10px] border-zinc-700 text-zinc-500">v{t.version}</Badge>
-        {t.triggerType==="auto"&&<Badge variant="outline" className="text-[10px] border-blue-500/30 text-blue-400">Auto</Badge>}
-      </div>
-      {exp===t.id?<ChevronDown className="w-4 h-4 text-zinc-500 shrink-0"/>:<ChevronRight className="w-4 h-4 text-zinc-500 shrink-0"/>}
+// ─── FIELD TYPES ─────────────────────────────────────────────────────────────
+const FIELD_TYPES = [
+  {value:"text",label:"Text"},
+  {value:"textarea",label:"Long Text"},
+  {value:"number",label:"Number"},
+  {value:"currency",label:"Currency"},
+  {value:"date",label:"Date"},
+  {value:"email",label:"Email"},
+  {value:"phone",label:"Phone"},
+  {value:"url",label:"URL"},
+  {value:"dropdown",label:"Dropdown"},
+  {value:"boolean",label:"Yes / No"},
+];
+const REQUIRED_AT_OPTS = ["create","complete","close","optional"];
+
+// ─── ADD / EDIT FIELD FORM ────────────────────────────────────────────────────
+function FieldForm({
+  caseTypeId, existing, allFields, onDone, onCancel,
+}:{
+  caseTypeId:string;
+  existing?:CustomField;
+  allFields:CustomField[];
+  onDone:()=>void;
+  onCancel:()=>void;
+}){
+  const [label,setLabel]=useState(existing?.label??"");
+  const [key,setKey]=useState(existing?.key??"");
+  const [type,setType]=useState(existing?.type??"text");
+  const [requiredAt,setRequiredAt]=useState(existing?.requiredAt??"optional");
+  const [optionsRaw,setOptionsRaw]=useState((existing?.options??[]).join(", "));
+  const [condKey,setCondKey]=useState(existing?.conditionalOn?.key??"");
+  const [condVal,setCondVal]=useState(existing?.conditionalOn?.value??"");
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState("");
+
+  function derivedKey(lbl:string){return lbl.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");}
+
+  async function save(){
+    if(!label.trim()||!key.trim()){setErr("Label and key are required.");return;}
+    setSaving(true); setErr("");
+    const body:{label:string;key?:string;type:string;requiredAt:string;options:string[];conditionalOn:{key:string;value:string}|null}={
+      label:label.trim(),
+      type,
+      requiredAt,
+      options: type==="dropdown"?optionsRaw.split(",").map(s=>s.trim()).filter(Boolean):[],
+      conditionalOn: condKey&&condVal?{key:condKey,value:condVal}:null,
+    };
+    try {
+      let r;
+      if(existing?.id){
+        r=await fetch(`/api/admin/case-types/${caseTypeId}/fields/${existing.id}`,{
+          method:"PUT",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(body),
+        });
+      } else {
+        r=await fetch(`/api/admin/case-types/${caseTypeId}/fields`,{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({...body,key:key.trim()}),
+        });
+      }
+      if(!r.ok){const d=await r.json();setErr(d.error||"Failed");setSaving(false);return;}
+      onDone();
+    } catch(e){setErr(String(e));setSaving(false);}
+  }
+
+  return <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-4 space-y-3 mt-2">
+    <p className="text-xs font-semibold text-indigo-400">{existing?"Edit Field":"Add Field"}</p>
+    {err&&<ErrBox msg={err}/>}
+    <div className="grid grid-cols-2 gap-3">
+      <FG label="Label" req>
+        <FIn value={label} onChange={v=>{setLabel(v);if(!existing)setKey(derivedKey(v));}} placeholder="e.g. Alert Type"/>
+      </FG>
+      <FG label="Key (snake_case)" req>
+        <FIn value={key} onChange={setKey} placeholder="alert_type" disabled={!!existing}/>
+      </FG>
     </div>
-    {exp===t.id&&<div className="px-5 pb-5 border-t border-zinc-800">
-      <div className="overflow-x-auto mt-3">
-        <table className="w-full text-xs min-w-[520px]">
-          <thead><tr className="border-b border-zinc-800">{["Key","Label","Type","Required At","Options"].map(h=><th key={h} className="pb-2 pr-4 text-left text-zinc-500 font-medium">{h}</th>)}</tr></thead>
-          <tbody>{t.fields.map(f=><tr key={f.key} className="border-b border-zinc-800/40 last:border-0">
-            <td className="py-2 pr-4 font-mono text-indigo-300 text-[10px]">{f.key}</td>
-            <td className="py-2 pr-4 text-zinc-200">{f.label}{f.conditionalOn&&<span className="ml-1 text-[9px] text-zinc-600">if {f.conditionalOn.key}={f.conditionalOn.value}</span>}</td>
-            <td className="py-2 pr-4 text-zinc-400">{f.type}</td>
-            <td className="py-2 pr-4 text-zinc-400">{f.requiredAt}</td>
-            <td className="py-2 pr-4 text-zinc-500">{f.options?.join(", ")||"—"}</td>
-          </tr>)}</tbody>
-        </table>
+    <div className="grid grid-cols-2 gap-3">
+      <FG label="Field Type">
+        <select value={type} onChange={e=>setType(e.target.value as CustomField["type"])} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+          {FIELD_TYPES.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </FG>
+      <FG label="Required At">
+        <select value={requiredAt} onChange={e=>setRequiredAt(e.target.value as CustomField["requiredAt"])} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+          {REQUIRED_AT_OPTS.map(o=><option key={o} value={o}>{o}</option>)}
+        </select>
+      </FG>
+    </div>
+    {type==="dropdown"&&<FG label="Options (comma-separated)">
+      <FIn value={optionsRaw} onChange={setOptionsRaw} placeholder="Option A, Option B, Option C"/>
+    </FG>}
+    <div className="grid grid-cols-2 gap-3">
+      <FG label="Show only when field…">
+        <select value={condKey} onChange={e=>setCondKey(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+          <option value="">Always show</option>
+          {allFields.filter(f=>f.key!==key).map(f=><option key={f.key} value={f.key}>{f.label}</option>)}
+        </select>
+      </FG>
+      {condKey&&<FG label="…equals">
+        <FIn value={condVal} onChange={setCondVal} placeholder="value"/>
+      </FG>}
+    </div>
+    <div className="flex gap-2 pt-1">
+      <Button variant="outline" onClick={onCancel} className="border-zinc-700 text-zinc-400 h-7 text-xs px-3">Cancel</Button>
+      <Button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-7 text-xs px-4 disabled:opacity-50">
+        {saving?<span className="flex items-center gap-1.5"><Spinner/>{existing?"Saving…":"Adding…"}</span>:existing?"Save Changes":"Add Field"}
+      </Button>
+    </div>
+  </div>;
+}
+
+// ─── CREATE / EDIT CASE TYPE MODAL ────────────────────────────────────────────
+function CaseTypeModal({
+  existing, onClose, onSaved,
+}:{
+  existing?:CaseType|null;
+  onClose:()=>void;
+  onSaved:()=>void;
+}){
+  const [name,setName]=useState(existing?.name??"");
+  const [dept,setDept]=useState<Department>(existing?.department??"AML");
+  const [trigger,setTrigger]=useState(existing?.triggerType??"manual");
+  const [approval,setApproval]=useState(existing?.approvalRequired??false);
+  const [slaDays,setSlaDays]=useState(String(existing?.sla?.slaDays??5));
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState("");
+
+  async function save(){
+    if(!name.trim()){setErr("Name is required.");return;}
+    setSaving(true); setErr("");
+    const body={name:name.trim(),department:dept,approvalRequired:approval,triggerType:trigger,slaDays:Number(slaDays)||5};
+    try {
+      const r=existing
+        ? await fetch(`/api/admin/case-types/${existing.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+        : await fetch("/api/admin/case-types",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      if(!r.ok){const d=await r.json();setErr(d.error||"Failed");setSaving(false);return;}
+      onSaved(); onClose();
+    } catch(e){setErr(String(e));setSaving(false);}
+  }
+
+  return <Modal title={existing?"Edit Case Type":"New Case Type"} onClose={onClose}>
+    <div className="space-y-4">
+      {err&&<ErrBox msg={err}/>}
+      <FG label="Name" req><FIn value={name} onChange={setName} placeholder="e.g. Sanctions Alert"/></FG>
+      <div className="grid grid-cols-2 gap-3">
+        <FG label="Department">
+          <FSel value={dept} onChange={v=>setDept(v as Department)} opts={[...DEPARTMENTS]}/>
+        </FG>
+        <FG label="Trigger">
+          <FSel value={trigger} onChange={setTrigger} opts={["manual","auto","api"]}/>
+        </FG>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <FG label="SLA (days)">
+          <FIn value={slaDays} onChange={setSlaDays} type="number"/>
+        </FG>
+        <FG label="Approval Required">
+          <label className="flex items-center gap-2 h-8 cursor-pointer">
+            <input type="checkbox" checked={approval} onChange={e=>setApproval(e.target.checked)} className="accent-indigo-500 w-4 h-4"/>
+            <span className="text-xs text-zinc-400">Requires maker/checker</span>
+          </label>
+        </FG>
+      </div>
+      <div className="flex gap-2 pt-2">
+        <Button variant="outline" onClick={onClose} className="border-zinc-700 text-zinc-400 h-8 text-xs">Cancel</Button>
+        <Button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex-1 disabled:opacity-50">
+          {saving?<span className="flex items-center gap-2"><Spinner/>{existing?"Saving…":"Creating…"}</span>:existing?"Save Changes":"Create Case Type"}
+        </Button>
+      </div>
+    </div>
+  </Modal>;
+}
+
+// ─── CASE TYPES PANEL ─────────────────────────────────────────────────────────
+function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()=>void}){
+  const [exp,setExp]=useState<string|null>(null);
+  const [showCreate,setShowCreate]=useState(false);
+  const [editing,setEditing]=useState<CaseType|null>(null);
+  const [deletingId,setDeletingId]=useState<string|null>(null);
+  const [deleteMsg,setDeleteMsg]=useState("");
+  const [addFieldFor,setAddFieldFor]=useState<string|null>(null);
+  const [editField,setEditField]=useState<{typeId:string;field:CustomField}|null>(null);
+  const [deleting,setDeleting]=useState(false);
+
+  async function deleteType(id:string){
+    setDeleting(true);
+    try {
+      const r=await fetch(`/api/admin/case-types/${id}`,{method:"DELETE"});
+      const d=await r.json();
+      if(d.deactivated) setDeleteMsg("Case type deactivated (cases exist using it).");
+      else setDeleteMsg("Case type deleted.");
+      setDeletingId(null);
+      onRefresh();
+    } catch(e){setDeleteMsg(String(e));}
+    setDeleting(false);
+  }
+
+  async function deleteField(typeId:string,fieldId:string){
+    await fetch(`/api/admin/case-types/${typeId}/fields/${fieldId}`,{method:"DELETE"});
+    onRefresh();
+  }
+
+  async function moveField(typeId:string,fieldId:string,dir:"up"|"down"){
+    await fetch(`/api/admin/case-types/${typeId}/fields/${fieldId}`,{
+      method:"PATCH",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({direction:dir}),
+    });
+    onRefresh();
+  }
+
+  if(caseTypes.length===0) return <div className="text-zinc-600 text-xs text-center py-8">Loading case types…</div>;
+
+  return <>
+    {showCreate&&<CaseTypeModal onClose={()=>setShowCreate(false)} onSaved={onRefresh}/>}
+    {editing&&<CaseTypeModal existing={editing} onClose={()=>setEditing(null)} onSaved={onRefresh}/>}
+
+    {/* Delete confirm */}
+    {deletingId&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm space-y-4">
+        <p className="text-white font-bold text-sm">Delete Case Type?</p>
+        <p className="text-zinc-400 text-xs">If any cases exist for this type, it will be deactivated instead of deleted.</p>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={()=>setDeletingId(null)} className="border-zinc-700 text-zinc-400 h-8 text-xs flex-1">Cancel</Button>
+          <Button onClick={()=>deleteType(deletingId)} disabled={deleting} className="bg-red-600 hover:bg-red-700 h-8 text-xs flex-1 disabled:opacity-50">
+            {deleting?<span className="flex items-center gap-1.5"><Spinner/>Deleting…</span>:"Delete"}
+          </Button>
+        </div>
+        {deleteMsg&&<p className="text-xs text-zinc-400">{deleteMsg}</p>}
       </div>
     </div>}
-  </div>)}</div>;
+
+    <div className="flex items-center justify-between mb-4">
+      <p className="text-xs text-zinc-500">{caseTypes.length} case types configured</p>
+      <Button onClick={()=>setShowCreate(true)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex items-center gap-1.5">
+        <Plus className="w-3.5 h-3.5"/>New Case Type
+      </Button>
+    </div>
+
+    <div className="space-y-3">
+      {caseTypes.map(t=><div key={t.id} className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+
+        {/* Header row */}
+        <div className="flex items-center gap-2 px-5 py-3.5">
+          <div className={`w-2 h-2 rounded-full shrink-0 ${t.active?"bg-green-400":"bg-zinc-600"}`}/>
+          <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0 cursor-pointer" onClick={()=>setExp(exp===t.id?null:t.id)}>
+            <p className="text-white text-sm font-semibold">{t.name}</p>
+            <DeptBadge dept={t.department}/>
+            {t.approvalRequired&&<Badge variant="outline" className="text-[10px] border-orange-500/30 text-orange-400">Approval Required</Badge>}
+            <Badge variant="outline" className="text-[10px] border-zinc-700 text-zinc-500">v{t.version}</Badge>
+            {t.triggerType!=="manual"&&<Badge variant="outline" className="text-[10px] border-blue-500/30 text-blue-400 capitalize">{t.triggerType}</Badge>}
+            {!t.active&&<Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400">Inactive</Badge>}
+            <span className="text-zinc-600 text-[10px]">{t.fields.filter(f=>f.active!==false).length} fields · {t.sla?.slaDays??5}d SLA</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={()=>setEditing(t)} className="p-1.5 text-zinc-500 hover:text-indigo-400 cursor-pointer rounded-lg hover:bg-zinc-800 transition-colors" title="Edit">
+              <FileText className="w-3.5 h-3.5"/>
+            </button>
+            <button onClick={()=>{setDeletingId(t.id);setDeleteMsg("");}} className="p-1.5 text-zinc-500 hover:text-red-400 cursor-pointer rounded-lg hover:bg-zinc-800 transition-colors" title="Delete">
+              <XCircle className="w-3.5 h-3.5"/>
+            </button>
+            <button onClick={()=>setExp(exp===t.id?null:t.id)} className="p-1.5 text-zinc-500 cursor-pointer rounded-lg hover:bg-zinc-800">
+              {exp===t.id?<ChevronDown className="w-4 h-4"/>:<ChevronRight className="w-4 h-4"/>}
+            </button>
+          </div>
+        </div>
+
+        {/* Expanded body */}
+        {exp===t.id&&<div className="border-t border-zinc-800 px-5 pb-5">
+
+          {/* Info strip */}
+          <div className="flex flex-wrap gap-4 py-3 border-b border-zinc-800/60 text-[10px] text-zinc-500">
+            <span>ID: <span className="font-mono text-zinc-400">{t.id}</span></span>
+            <span>Trigger: <span className="text-zinc-400">{t.triggerType}</span></span>
+            <span>SLA: <span className="text-zinc-400">{t.sla?.slaDays??5} days</span></span>
+            <span>Approval: <span className="text-zinc-400">{t.approvalRequired?"Yes":"No"}</span></span>
+          </div>
+
+          {/* Fields section */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-zinc-300">Fields ({t.fields.filter(f=>f.active!==false).length})</p>
+              <button
+                onClick={()=>{setAddFieldFor(addFieldFor===t.id?null:t.id);setEditField(null);}}
+                className="flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 cursor-pointer px-2 py-1 rounded-lg hover:bg-indigo-500/10 transition-colors"
+              >
+                <Plus className="w-3 h-3"/>{addFieldFor===t.id?"Cancel":"Add Field"}
+              </button>
+            </div>
+
+            {/* Add field form */}
+            {addFieldFor===t.id&&<FieldForm
+              caseTypeId={t.id}
+              allFields={t.fields}
+              onDone={()=>{setAddFieldFor(null);onRefresh();}}
+              onCancel={()=>setAddFieldFor(null)}
+            />}
+
+            {/* Edit field form */}
+            {editField?.typeId===t.id&&<FieldForm
+              caseTypeId={t.id}
+              existing={editField.field}
+              allFields={t.fields}
+              onDone={()=>{setEditField(null);onRefresh();}}
+              onCancel={()=>setEditField(null)}
+            />}
+
+            {t.fields.length===0&&!addFieldFor&&<p className="text-zinc-600 text-xs py-2">No fields yet. Add the first one above.</p>}
+
+            {t.fields.length>0&&<div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[600px] mt-1">
+                <thead>
+                  <tr className="border-b border-zinc-800">
+                    {["","Key","Label","Type","Required At","Options / Condition",""].map((h,i)=>
+                      <th key={i} className={`pb-2 text-left text-zinc-500 font-medium ${i===0?"w-10":i===6?"w-20 text-right":"pr-3"}`}>{h}</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {t.fields.map((f,idx)=><tr key={f.key} className={`border-b border-zinc-800/40 last:border-0 ${f.active===false?"opacity-40":""}`}>
+                    <td className="py-1.5 pr-1">
+                      <div className="flex flex-col gap-0.5">
+                        <button disabled={idx===0} onClick={()=>f.id&&moveField(t.id,f.id,"up")} className="text-zinc-600 hover:text-zinc-400 disabled:opacity-20 cursor-pointer leading-none">▲</button>
+                        <button disabled={idx===t.fields.length-1} onClick={()=>f.id&&moveField(t.id,f.id,"down")} className="text-zinc-600 hover:text-zinc-400 disabled:opacity-20 cursor-pointer leading-none">▼</button>
+                      </div>
+                    </td>
+                    <td className="py-1.5 pr-3 font-mono text-indigo-300 text-[10px]">{f.key}</td>
+                    <td className="py-1.5 pr-3 text-zinc-200">{f.label}</td>
+                    <td className="py-1.5 pr-3 text-zinc-400">{FIELD_TYPES.find(ft=>ft.value===f.type)?.label??f.type}</td>
+                    <td className="py-1.5 pr-3">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                        f.requiredAt==="create"?"bg-red-500/15 text-red-300":
+                        f.requiredAt==="complete"?"bg-amber-500/15 text-amber-300":
+                        f.requiredAt==="close"?"bg-orange-500/15 text-orange-300":
+                        "bg-zinc-800 text-zinc-500"
+                      }`}>{f.requiredAt}</span>
+                    </td>
+                    <td className="py-1.5 pr-3 text-zinc-500 text-[10px]">
+                      {f.type==="dropdown"&&f.options?.length?(f.options.slice(0,3).join(", ")+(f.options.length>3?` +${f.options.length-3}`:"")):""}
+                      {f.conditionalOn&&<span className="text-zinc-600"> if {f.conditionalOn.key}={f.conditionalOn.value}</span>}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={()=>{setEditField({typeId:t.id,field:f});setAddFieldFor(null);}} className="p-1 text-zinc-600 hover:text-indigo-400 cursor-pointer rounded hover:bg-zinc-800" title="Edit field">
+                          <FileText className="w-3 h-3"/>
+                        </button>
+                        <button onClick={()=>f.id&&deleteField(t.id,f.id)} className="p-1 text-zinc-600 hover:text-red-400 cursor-pointer rounded hover:bg-zinc-800" title="Delete field">
+                          <X className="w-3 h-3"/>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>)}
+                </tbody>
+              </table>
+            </div>}
+          </div>
+        </div>}
+      </div>)}
+    </div>
+  </>;
 }
 
 // ─── MAIN PAGE INNER ──────────────────────────────────────────────────────────
@@ -623,11 +956,15 @@ function CasesInner(){
     setLoading(false);
   },[filterDept,filterStatus,filterType,filterLic,filterAssignee,search,router,caseTypes]);
 
+  const fetchCaseTypes=useCallback(()=>{
+    fetch("/api/case-types").then(async r=>{if(r.ok){const d=await r.json();setCaseTypes(d.caseTypes||[]);}}).catch(()=>{});
+  },[]);
+
   useEffect(()=>{
     fetch("/api/auth/me").then(async r=>{if(r.status===401){router.push("/login");return;}const d=await r.json();setUser(d.user);});
-    fetch("/api/case-types").then(async r=>{if(r.ok){const d=await r.json();setCaseTypes(d.caseTypes||[]);}}).catch(()=>{});
+    fetchCaseTypes();
     if(params?.get("create")==="true")setShowCreate(true);
-  },[router,params]);
+  },[router,params,fetchCaseTypes]);
 
   useEffect(()=>{fetchCases();},[fetchCases]);
 
@@ -663,7 +1000,7 @@ function CasesInner(){
 
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {tab==="analytics"&&<AnalyticsPanel/>}
-      {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes}/>}
+      {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes} onRefresh={()=>{fetchCaseTypes();fetchCases();}}/>}
       {tab==="cases"&&<>
         {/* Filter bar */}
         <div className="flex flex-wrap gap-2 mb-4">
