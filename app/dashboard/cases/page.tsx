@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useState, useMemo, useCallback, Suspense } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus, Search, X, Download, Clock, CheckCircle, AlertTriangle,
   ArrowRight, Paperclip, Send, Eye, FileText, AlertCircle, Check,
-  XCircle, ArrowLeftRight, ChevronDown, ChevronRight, Inbox,
+  XCircle, ArrowLeftRight, ChevronDown, ChevronRight, Inbox, Upload,
+  Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,8 @@ type Department = "AML"|"Onboarding"|"Compliance"|"Settlements"|"Fraud";
 interface CaseType {
   id: string; name: string; department: Department; approvalRequired: boolean;
   fields: CustomField[]; active: boolean; triggerType: string; version: number;
+  priority?: string; description?: string; color?: string; allowedInitiatorRoles?: string[];
+  approverTemplates?: ApproverTemplate[];
   sla?: { slaDays: number; escalationDays: number | null; escalateTo: string | null };
 }
 interface CustomField {
@@ -46,6 +49,11 @@ interface Case {
   audit: AuditEntry[]; comments: Comment[]; attachments: Attachment[];
   createdAt: string; updatedAt: string; closedAt?: string;
 }
+interface ApproverTemplate { id: string; name: string; role: string; roleId: string | null; roleColor: string | null; sortOrder: number }
+interface Role { id: string; name: string; description: string; color: string; userCount: number }
+interface OrgDept { id: string; name: string; description: string; headEmail: string; members: { type: "user" | "role"; ref: string }[] }
+interface UserInfo { id: string; email: string; displayName: string }
+interface FlowTransition { from: CaseStatus; to: CaseStatus; requiresReason: boolean }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const STATUS_META: Record<CaseStatus,{label:string;color:string}> = {
@@ -58,13 +66,43 @@ const STATUS_META: Record<CaseStatus,{label:string;color:string}> = {
   pending_approval:{label:"Pending Approval",color:"bg-orange-500/15 text-orange-400 border-orange-500/30"},
   closed:          {label:"Closed",          color:"bg-zinc-800 text-zinc-600 border-zinc-700"},
 };
-const TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
+const ALL_STATUSES: CaseStatus[] = ["new","active","rfi","handoff","complete","reject","pending_approval","closed"];
+const FALLBACK_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   new:["active"], active:["rfi","complete","reject","handoff"], rfi:["active"], handoff:["active"],
   complete:["pending_approval","closed"], reject:["pending_approval","closed"],
   pending_approval:["closed","active"], closed:["active"],
 };
 const DEPARTMENTS: Department[] = ["AML","Onboarding","Compliance","Settlements","Fraud"];
 const ASSIGNEES = ["Sarah K.","Tom B.","Maria L.","Anna W.","James R.","Lisa M."];
+const PRIORITIES = ["low","medium","high","critical"] as const;
+const PRIORITY_META: Record<string,{label:string;color:string}> = {
+  low:      {label:"Low",      color:"text-zinc-400"},
+  medium:   {label:"Medium",   color:"text-amber-400"},
+  high:     {label:"High",     color:"text-orange-400"},
+  critical: {label:"Critical", color:"text-red-400"},
+};
+const ROLE_COLORS = ["indigo","blue","green","red","amber","purple","teal","pink","orange","cyan"];
+const COLOR_CLASSES: Record<string,string> = {
+  indigo:"bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+  blue:"bg-blue-500/15 text-blue-400 border-blue-500/30",
+  green:"bg-green-500/15 text-green-400 border-green-500/30",
+  red:"bg-red-500/15 text-red-400 border-red-500/30",
+  amber:"bg-amber-500/15 text-amber-400 border-amber-500/30",
+  purple:"bg-purple-500/15 text-purple-400 border-purple-500/30",
+  teal:"bg-teal-500/15 text-teal-400 border-teal-500/30",
+  pink:"bg-pink-500/15 text-pink-400 border-pink-500/30",
+  orange:"bg-orange-500/15 text-orange-400 border-orange-500/30",
+  cyan:"bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+};
+
+const FIELD_TYPES = [
+  {value:"text",label:"Text"},{value:"textarea",label:"Long Text"},
+  {value:"number",label:"Number"},{value:"currency",label:"Currency"},
+  {value:"date",label:"Date"},{value:"email",label:"Email"},
+  {value:"phone",label:"Phone"},{value:"url",label:"URL"},
+  {value:"dropdown",label:"Dropdown"},{value:"boolean",label:"Yes / No"},
+];
+const REQUIRED_AT_OPTS = ["create","complete","close","optional"];
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 function StatusBadge({status}:{status:CaseStatus}){
@@ -113,17 +151,31 @@ function Spinner(){return <div className="w-4 h-4 border-2 border-white/20 borde
 function ErrBox({msg,onRetry}:{msg:string;onRetry?:()=>void}){
   return <div className="text-red-400 text-xs bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 flex items-center gap-2"><AlertCircle className="w-4 h-4 shrink-0"/>{msg}{onRetry&&<button className="ml-auto underline cursor-pointer" onClick={onRetry}>Retry</button>}</div>;
 }
+function SectionDivider({label}:{label:string}){
+  return <div className="flex items-center gap-3 mt-5 mb-3 pt-4 border-t border-zinc-800/60">
+    <p className="text-xs font-semibold text-zinc-300 whitespace-nowrap">{label}</p>
+    <div className="flex-1 h-px bg-zinc-800"/>
+  </div>;
+}
 
 // ─── CREATE CASE MODAL ────────────────────────────────────────────────────────
+interface BulkClient { id: string; name: string }
+
 function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onClose:()=>void;onCreate:(id:string)=>void;defaultTransactionId?:string;caseTypes:CaseType[]}){
   const [step,setStep]=useState(1);
   const [typeId,setTypeId]=useState("");
+  // single client
   const [clientId,setClientId]=useState("");
   const [clientName,setClientName]=useState("");
+  // bulk
+  const [bulk,setBulk]=useState(false);
+  const [bulkClients,setBulkClients]=useState<BulkClient[]>([{id:"",name:""},{id:"",name:""}]);
+  // common
   const [description,setDescription]=useState("");
   const [license,setLicense]=useState("");
   const [fields,setFields]=useState<Record<string,string>>({});
   const [saving,setSaving]=useState(false);
+  const [saveProgress,setSaveProgress]=useState<{done:number;total:number}|null>(null);
   const [error,setError]=useState("");
   const ctype=caseTypes.find(t=>t.id===typeId);
 
@@ -131,21 +183,47 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
     if(defaultTransactionId) setFields(f=>({...f,transaction_id:defaultTransactionId,review_reason:"Manual Trigger"}));
   },[defaultTransactionId]);
 
+  function addBulkClient(){setBulkClients(prev=>[...prev,{id:"",name:""}]);}
+  function updateBulkClient(i:number,field:"id"|"name",val:string){
+    setBulkClients(prev=>prev.map((c,idx)=>idx===i?{...c,[field]:val}:c));
+  }
+  function removeBulkClient(i:number){setBulkClients(prev=>prev.filter((_,idx)=>idx!==i));}
+
+  async function createOne(cid:string|null,cname:string|null):Promise<string>{
+    const r=await fetch("/api/cases",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({typeId,clientId:cid,clientName:cname,department:ctype?.department,description,license,customFields:fields,transactionId:defaultTransactionId||null,reporter:"Sarah K."})});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.error||"Failed to create case");
+    return data.id as string;
+  }
+
   async function submit(){
     if(!typeId||!description||!license){setError("All required fields missing.");return;}
     setSaving(true); setError("");
     try {
-      const r=await fetch("/api/cases",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({typeId,clientId:clientId||null,clientName:clientName||null,department:ctype?.department,description,license,customFields:fields,transactionId:defaultTransactionId||null,reporter:"Sarah K."})});
-      const data=await r.json();
-      if(!r.ok){setError(data.error||"Failed to create case.");setSaving(false);return;}
-      onCreate(data.id); onClose();
-    } catch(e){setError(String(e)); setSaving(false);}
+      if(bulk){
+        const valid=bulkClients.filter(c=>c.name.trim());
+        if(valid.length===0){setError("Add at least one client name.");setSaving(false);return;}
+        setSaveProgress({done:0,total:valid.length});
+        let lastId="";
+        for(let i=0;i<valid.length;i++){
+          lastId=await createOne(valid[i].id||null,valid[i].name.trim());
+          setSaveProgress({done:i+1,total:valid.length});
+        }
+        onCreate(lastId); onClose();
+      } else {
+        const id=await createOne(clientId||null,clientName||null);
+        onCreate(id); onClose();
+      }
+    } catch(e){setError(String(e));setSaving(false);setSaveProgress(null);}
   }
+
+  const validBulkCount=bulkClients.filter(c=>c.name.trim()).length;
 
   return <Modal title="Create New Case" onClose={onClose} wide>
     <div className="flex gap-2 mb-6">{[1,2,3].map(s=><div key={s} className={`flex-1 h-1 rounded-full transition-colors ${step>=s?"bg-indigo-500":"bg-zinc-700"}`}/>)}</div>
     {error&&<ErrBox msg={error}/>}
 
+    {/* Step 1: Type */}
     {step===1&&<div className="space-y-4 mt-3">
       <p className="text-xs text-zinc-400">Select the case type to proceed.</p>
       <div className="grid gap-2">{caseTypes.filter(t=>t.active).map(t=><button data-testid={`type-opt-${t.id}`} key={t.id} onClick={()=>{setTypeId(t.id);setStep(2);}} className={`flex items-center gap-4 p-4 rounded-xl border text-left cursor-pointer transition-all ${typeId===t.id?"border-indigo-500 bg-indigo-500/10":"border-zinc-700 hover:border-zinc-600 bg-zinc-800/30"}`}>
@@ -155,10 +233,38 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
       </button>)}</div>
     </div>}
 
+    {/* Step 2: Clients + details */}
     {step===2&&<div className="space-y-4 mt-3">
       <p className="text-xs text-zinc-500">Type: <span className="text-indigo-400 font-medium">{ctype?.name}</span></p>
-      <FG label="Client ID"><FIn value={clientId} onChange={v=>{setClientId(v);setClientName(v?`Client ${v}`:"");}} placeholder="MCH-XXXX (optional for precheck)"/></FG>
-      <FG label="Client Name"><FIn value={clientName} onChange={setClientName} placeholder="Resolved from ID"/></FG>
+
+      {/* Single / Bulk toggle */}
+      <div className="flex rounded-lg border border-zinc-700 overflow-hidden">
+        <button onClick={()=>setBulk(false)} className={`flex-1 py-2 text-xs font-medium cursor-pointer transition-colors ${!bulk?"bg-indigo-600 text-white":"bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}>
+          Single Client
+        </button>
+        <button onClick={()=>setBulk(true)} className={`flex-1 py-2 text-xs font-medium cursor-pointer transition-colors flex items-center justify-center gap-1.5 ${bulk?"bg-indigo-600 text-white":"bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}>
+          <Users className="w-3 h-3"/>Bulk Creation
+        </button>
+      </div>
+
+      {!bulk&&<>
+        <FG label="Client ID"><FIn value={clientId} onChange={v=>{setClientId(v);setClientName(v?`Client ${v}`:"");}} placeholder="MCH-XXXX (optional for precheck)"/></FG>
+        <FG label="Client Name"><FIn value={clientName} onChange={setClientName} placeholder="Resolved from ID"/></FG>
+      </>}
+
+      {bulk&&<div className="space-y-2">
+        <p className="text-[10px] text-zinc-500">One case will be cloned per client with identical content.</p>
+        {bulkClients.map((c,i)=><div key={i} className="flex gap-2 items-center">
+          <FIn value={c.id} onChange={v=>updateBulkClient(i,"id",v)} placeholder={`Client ID ${i+1} (opt.)`}/>
+          <FIn value={c.name} onChange={v=>updateBulkClient(i,"name",v)} placeholder={`Client Name ${i+1} *`}/>
+          {bulkClients.length>1&&<button onClick={()=>removeBulkClient(i)} className="text-zinc-600 hover:text-red-400 cursor-pointer shrink-0 p-1"><X className="w-3.5 h-3.5"/></button>}
+        </div>)}
+        <button onClick={addBulkClient} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer px-2 py-1 rounded-lg hover:bg-indigo-500/10 transition-colors">
+          <Plus className="w-3 h-3"/>Add Client
+        </button>
+        {validBulkCount>0&&<p className="text-[10px] text-indigo-400">{validBulkCount} case{validBulkCount!==1?"s":""} will be created</p>}
+      </div>}
+
       <FG label="License" req><FSel value={license} onChange={setLicense} opts={["UK","CA","MT"]}/></FG>
       <FG label="Description" req><FTa value={description} onChange={setDescription} placeholder="Describe the case…" rows={3}/></FG>
       <div className="flex gap-2 pt-2">
@@ -167,8 +273,9 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
       </div>
     </div>}
 
+    {/* Step 3: Custom Fields */}
     {step===3&&ctype&&<div className="space-y-4 mt-3">
-      <p className="text-xs text-zinc-500">Custom fields for <span className="text-indigo-400">{ctype.name}</span></p>
+      <p className="text-xs text-zinc-500">Custom fields for <span className="text-indigo-400">{ctype.name}</span>{bulk&&<span className="ml-2 text-zinc-600">· will apply to all {validBulkCount} clients</span>}</p>
       {ctype.fields.filter(f=>f.active&&(f.requiredAt==="create"||f.requiredAt==="optional")).map(f=>{
         if(f.conditionalOn&&fields[f.conditionalOn.key]!==f.conditionalOn.value) return null;
         return <FG key={f.key} label={f.label} req={f.requiredAt==="create"}>
@@ -180,10 +287,12 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
         </FG>;
       })}
       {defaultTransactionId&&<div className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 p-3 text-xs text-indigo-300">Linked to transaction <span className="font-mono font-semibold">{defaultTransactionId}</span></div>}
+      {saveProgress&&<div className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 p-3 text-xs text-indigo-300 flex items-center gap-2"><Spinner/>Creating case {saveProgress.done} / {saveProgress.total}…</div>}
       <div className="flex gap-2 pt-2">
         <Button variant="outline" onClick={()=>setStep(2)} className="border-zinc-700 text-zinc-400 h-8 text-xs">Back</Button>
         <Button data-testid="submit-case" onClick={submit} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex-1 disabled:opacity-50">
-          {saving?<span className="flex items-center gap-2"><Spinner/>Creating…</span>:"Create Case"}
+          {saving?<span className="flex items-center gap-2"><Spinner/>{saveProgress?`${saveProgress.done}/${saveProgress.total}…`:"Creating…"}</span>
+          :bulk?`Create ${validBulkCount} Case${validBulkCount!==1?"s":""}`:"Create Case"}
         </Button>
       </div>
     </div>}
@@ -191,13 +300,13 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
 }
 
 // ─── STATUS CHANGE MODAL ──────────────────────────────────────────────────────
-function StatusModal({c,onClose,onUpdate}:{c:Case;onClose:()=>void;onUpdate:(id:string,patch:Partial<Case>)=>void}){
+function StatusModal({c,onClose,onUpdate,overrideTransitions}:{c:Case;onClose:()=>void;onUpdate:(id:string,patch:Partial<Case>)=>void;overrideTransitions?:CaseStatus[]}){
   const [newStatus,setNewStatus]=useState<CaseStatus|"">("");
   const [reason,setReason]=useState("");
   const [assignee,setAssignee]=useState(c.assignee||"");
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState("");
-  const allowed=TRANSITIONS[c.status]||[];
+  const allowed=overrideTransitions??FALLBACK_TRANSITIONS[c.status]??[];
 
   async function apply(){
     if(!newStatus)return;
@@ -226,7 +335,7 @@ function StatusModal({c,onClose,onUpdate}:{c:Case;onClose:()=>void;onUpdate:(id:
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-xs"><StatusBadge status={c.status}/><ArrowRight className="w-3 h-3 text-zinc-600"/><span className="text-zinc-400">Select new status</span></div>
       {error&&<ErrBox msg={error}/>}
-      <div className="grid gap-2" data-testid="status-options">{allowed.map(s=><button key={s} onClick={()=>setNewStatus(s)} className={`flex items-center gap-3 p-3 rounded-xl border text-left cursor-pointer transition-all text-xs ${newStatus===s?"border-indigo-500 bg-indigo-500/10":"border-zinc-700 hover:border-zinc-600"}`}><span className="font-medium text-white">{STATUS_META[s].label}</span></button>)}</div>
+      <div className="grid gap-2" data-testid="status-options">{allowed.map(s=><button key={s} onClick={()=>setNewStatus(s)} className={`flex items-center gap-3 p-3 rounded-xl border text-left cursor-pointer transition-all text-xs ${newStatus===s?"border-indigo-500 bg-indigo-500/10":"border-zinc-700 hover:border-zinc-600"}`}><span className="font-medium text-white">{STATUS_META[s]?.label??s}</span></button>)}</div>
       {newStatus==="active"&&!c.assignee&&<FG label="Assign to" req><FSel value={assignee} onChange={setAssignee} opts={ASSIGNEES}/></FG>}
       {(newStatus==="reject"||newStatus==="handoff")&&<FG label="Reason" req><FTa value={reason} onChange={setReason} placeholder="Required…"/></FG>}
       <div className="flex gap-2 pt-2">
@@ -381,13 +490,19 @@ function ActivityFeed({c,onCommentAdded}:{c:Case;onCommentAdded:(comment:Comment
 }
 
 // ─── CASE DETAIL DRAWER ───────────────────────────────────────────────────────
-function CaseDetail({caseId,onClose,onUpdate,caseTypes}:{caseId:string;onClose:()=>void;onUpdate:(id:string,patch:Partial<Case>)=>void;caseTypes:CaseType[]}){
+function CaseDetail({caseId,onClose,onUpdate,caseTypes,allUsers}:{caseId:string;onClose:()=>void;onUpdate:(id:string,patch:Partial<Case>)=>void;caseTypes:CaseType[];allUsers:UserInfo[]}){
   const [c,setC]=useState<Case|null>(null);
   const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState("details");
   const [showStatus,setShowStatus]=useState(false);
   const [showHandoff,setShowHandoff]=useState(false);
   const [showRfi,setShowRfi]=useState(false);
+  const [uploading,setUploading]=useState(false);
+  const [uploadError,setUploadError]=useState("");
+  const [allowedTransitions,setAllowedTransitions]=useState<CaseStatus[]|null>(null);
+  const [assigneeInput,setAssigneeInput]=useState("");
+  const [savingAssignee,setSavingAssignee]=useState(false);
+  const fileRef=useRef<HTMLInputElement>(null);
 
   const fetchCase=useCallback(async()=>{
     setLoading(true);
@@ -397,8 +512,52 @@ function CaseDetail({caseId,onClose,onUpdate,caseTypes}:{caseId:string;onClose:(
 
   useEffect(()=>{fetchCase();},[fetchCase]);
 
+  // Fetch per-case-type transitions when case or type changes
+  useEffect(()=>{
+    if(!c?.typeId||!c?.status)return;
+    fetch(`/api/admin/case-types/${c.typeId}/transitions`)
+      .then(r=>r.json())
+      .then(d=>{
+        const ts:(Array<{from:string;to:string}>)=d.transitions||[];
+        const allowed=ts.filter(t=>t.from===c.status).map(t=>t.to as CaseStatus);
+        setAllowedTransitions(allowed.length>0?allowed:null);
+      })
+      .catch(()=>{});
+  },[c?.typeId,c?.status]);
+
+  async function handleFileUpload(file:File){
+    if(file.size>7_500_000){setUploadError("File too large (max 7.5 MB).");return;}
+    setUploading(true); setUploadError("");
+    try {
+      const buf=await file.arrayBuffer();
+      const bytes=new Uint8Array(buf);
+      let binary="";
+      for(let i=0;i<bytes.byteLength;i++) binary+=String.fromCharCode(bytes[i]);
+      const base64=btoa(binary);
+      const r=await fetch(`/api/cases/${caseId}/attachments`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name:file.name,size:`${(file.size/1024).toFixed(1)} KB`,mimeType:file.type,data:base64}),
+      });
+      if(r.ok) fetchCase();
+      else{const d=await r.json();setUploadError(d.error||"Upload failed");}
+    } catch(e){setUploadError(String(e));}
+    setUploading(false);
+    if(fileRef.current) fileRef.current.value="";
+  }
+
   function handleUpdate(id:string,patch:Partial<Case>){setC(prev=>prev?{...prev,...patch}:null);onUpdate(id,patch);}
   function addComment(comment:Comment){setC(prev=>prev?{...prev,comments:[...prev.comments,comment]}:null);}
+
+  async function saveAssignee(email:string){
+    if(!email)return;
+    setSavingAssignee(true);
+    try{
+      const r=await fetch(`/api/cases/${caseId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({assignee:email})});
+      if(r.ok){handleUpdate(caseId,{assignee:email});setAssigneeInput("");}
+    }catch{}
+    setSavingAssignee(false);
+  }
 
   const ctype=caseTypes.find(t=>t.id===c?.typeId);
   const approvedCount=c?.approvers.filter(a=>a.status==="approved").length??0;
@@ -442,9 +601,10 @@ function CaseDetail({caseId,onClose,onUpdate,caseTypes}:{caseId:string;onClose:(
 
         {/* Tabs */}
         <div className="flex gap-0 px-6 border-b border-zinc-800 shrink-0 overflow-x-auto" style={{scrollbarWidth:"none"}}>
-          {[["details","Details"],["activity","Activity"],["docs","Documentation"],["approvals","Approvals"]].map(([id,label])=>
+          {[["details","Details"],["activity","Activity"],["docs","Documents"],["approvals","Approvals"]].map(([id,label])=>
             <button key={id} onClick={()=>setTab(id)} data-testid={`drawer-tab-${id}`} className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 cursor-pointer transition-colors ${tab===id?"border-indigo-500 text-indigo-400":"border-transparent text-zinc-500 hover:text-zinc-300"}`}>
               {label}{id==="approvals"&&c.approvers.length>0&&<span className="ml-1 text-[9px] bg-zinc-700 px-1 rounded-full">{approvedCount}/{c.approvers.length}</span>}
+              {id==="docs"&&c.attachments.length>0&&<span className="ml-1 text-[9px] bg-zinc-700 px-1 rounded-full">{c.attachments.length}</span>}
             </button>
           )}
         </div>
@@ -455,6 +615,36 @@ function CaseDetail({caseId,onClose,onUpdate,caseTypes}:{caseId:string;onClose:(
             <div className="rounded-xl border border-zinc-800 bg-zinc-950/30 p-4">
               <p className="text-xs font-semibold text-white mb-2">Description</p>
               <p className="text-zinc-300 text-xs leading-relaxed">{c.description}</p>
+            </div>
+            {/* Assignee selector */}
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+              <p className="text-xs font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-3.5 h-3.5 text-zinc-400"/>Assignment</p>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex-1">
+                  <p className="text-[10px] text-zinc-500 mb-0.5">Current Assignee</p>
+                  <p className="text-xs text-zinc-200 font-medium">{c.assignee||<span className="text-zinc-600 italic">Unassigned</span>}</p>
+                </div>
+                {c.assignee&&<button onClick={()=>saveAssignee("")} disabled={savingAssignee} className="text-xs text-zinc-500 hover:text-red-400 cursor-pointer px-2 py-1 rounded hover:bg-zinc-800 transition-colors disabled:opacity-50">Unassign</button>}
+              </div>
+              <div className="flex gap-2">
+                {allUsers.length>0
+                  ?<>
+                    <select value={assigneeInput} onChange={e=>setAssigneeInput(e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+                      <option value="">Select user…</option>
+                      {allUsers.map(u=><option key={u.email} value={u.email}>{u.displayName||u.email}</option>)}
+                    </select>
+                    <Button onClick={()=>saveAssignee(assigneeInput)} disabled={savingAssignee||!assigneeInput} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3 shrink-0 disabled:opacity-50">
+                      {savingAssignee?<Spinner/>:"Assign"}
+                    </Button>
+                  </>
+                  :<>
+                    <FIn value={assigneeInput} onChange={setAssigneeInput} placeholder="Enter name or email…"/>
+                    <Button onClick={()=>saveAssignee(assigneeInput)} disabled={savingAssignee||!assigneeInput.trim()} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3 shrink-0 disabled:opacity-50">
+                      {savingAssignee?<Spinner/>:"Assign"}
+                    </Button>
+                  </>
+                }
+              </div>
             </div>
             {c.resolution&&<div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4"><p className="text-xs font-semibold text-green-400 mb-1">Resolution</p><p className="text-zinc-300 text-xs">{c.resolution}</p></div>}
             {c.rejectReason&&<div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4"><p className="text-xs font-semibold text-red-400 mb-1">Rejection Reason</p><p className="text-zinc-300 text-xs">{c.rejectReason}</p></div>}
@@ -473,17 +663,29 @@ function CaseDetail({caseId,onClose,onUpdate,caseTypes}:{caseId:string;onClose:(
           {tab==="activity"&&<ActivityFeed c={c} onCommentAdded={addComment}/>}
 
           {tab==="docs"&&<div className="space-y-2">
-            {c.attachments.map(a=><div key={a.id} className="flex items-center gap-3 p-3 rounded-lg border border-zinc-800 hover:bg-zinc-800/30">
+            <input ref={fileRef} type="file" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleFileUpload(f);}}/>
+            {uploadError&&<ErrBox msg={uploadError}/>}
+            {c.attachments.length===0&&!uploading&&<div className="rounded-xl border border-dashed border-zinc-700 p-8 text-center">
+              <Upload className="w-8 h-8 text-zinc-600 mx-auto mb-2"/>
+              <p className="text-zinc-500 text-xs mb-3">No documents attached to this case</p>
+              <Button variant="outline" size="sm" className="border-zinc-600 text-zinc-400 h-7 text-xs" onClick={()=>fileRef.current?.click()}>
+                <Paperclip className="w-3 h-3 mr-1.5"/>Upload First Document
+              </Button>
+            </div>}
+            {c.attachments.map(a=><div key={a.id} className="flex items-center gap-3 p-3 rounded-lg border border-zinc-800 hover:bg-zinc-800/30 group">
               <Paperclip className="w-4 h-4 text-zinc-500 shrink-0"/>
               <div className="flex-1 min-w-0">
                 <p className="text-zinc-200 text-xs font-medium truncate">{a.name}</p>
-                <p className="text-zinc-600 text-[10px]">{a.size} · {a.uploadedBy} · {a.ts} · {a.source}</p>
+                <p className="text-zinc-600 text-[10px]">{a.size}{a.size&&" · "}{a.uploadedBy} · {a.ts}{a.source==="upload"?"":" · "+a.source}</p>
                 {a.tags.length>0&&<div className="flex gap-1 mt-1">{a.tags.map(t=><span key={t} className="text-[9px] bg-zinc-700 text-zinc-400 px-1.5 py-0.5 rounded">{t}</span>)}</div>}
               </div>
-              <button className="text-indigo-400 hover:text-indigo-300 cursor-pointer shrink-0"><Download className="w-3.5 h-3.5"/></button>
+              <a href={`/api/cases/${c.id}/attachments/${a.id}`} download={a.name} className="text-indigo-400 hover:text-indigo-300 cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" title="Download">
+                <Download className="w-3.5 h-3.5"/>
+              </a>
             </div>)}
-            {c.attachments.length===0&&<p className="text-zinc-600 text-xs text-center py-6">No attachments</p>}
-            <Button variant="outline" size="sm" className="border-zinc-700 text-zinc-400 h-7 text-xs w-full mt-2"><Paperclip className="w-3 h-3 mr-1"/>Upload</Button>
+            {c.attachments.length>0&&<Button variant="outline" size="sm" className="border-zinc-700 text-zinc-400 h-7 text-xs w-full mt-1" onClick={()=>fileRef.current?.click()} disabled={uploading}>
+              {uploading?<span className="flex items-center gap-1.5"><Spinner/>Uploading…</span>:<><Upload className="w-3 h-3 mr-1.5"/>Upload Document</>}
+            </Button>}
           </div>}
 
           {tab==="approvals"&&<div className="space-y-3">
@@ -506,9 +708,343 @@ function CaseDetail({caseId,onClose,onUpdate,caseTypes}:{caseId:string;onClose:(
         </div>
       </div>
     </div>
-    {showStatus&&<StatusModal c={c} onClose={()=>setShowStatus(false)} onUpdate={(id,patch)=>{handleUpdate(id,patch);setShowStatus(false);}}/>}
+    {showStatus&&<StatusModal c={c} onClose={()=>setShowStatus(false)} overrideTransitions={allowedTransitions??undefined} onUpdate={(id,patch)=>{handleUpdate(id,patch);setShowStatus(false);}}/>}
     {showHandoff&&<HandoffModal c={c} onClose={()=>setShowHandoff(false)} onUpdate={(id,patch)=>{handleUpdate(id,patch);setShowHandoff(false);}}/>}
     {showRfi&&<RfiModal c={c} onClose={()=>setShowRfi(false)} onUpdate={(id,patch)=>{handleUpdate(id,patch);setShowRfi(false);}}/>}
+  </>;
+}
+
+function RoleBadge({name,color}:{name:string;color?:string|null}){
+  const cls=COLOR_CLASSES[color??"indigo"]??COLOR_CLASSES.indigo;
+  return <Badge variant="outline" className={`text-[10px] ${cls}`}>{name}</Badge>;
+}
+
+// ─── ROLES PANEL ──────────────────────────────────────────────────────────────
+function RolesPanel(){
+  const [roles,setRoles]=useState<Role[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [expanded,setExpanded]=useState<string|null>(null);
+  const [members,setMembers]=useState<Record<string,{email:string;assignedAt:string}[]>>({});
+  const [showCreate,setShowCreate]=useState(false);
+  const [editRole,setEditRole]=useState<Role|null>(null);
+  const [deletingId,setDeletingId]=useState<string|null>(null);
+  const [newEmail,setNewEmail]=useState("");
+  const [addingTo,setAddingTo]=useState<string|null>(null);
+  const [err,setErr]=useState("");
+
+  // Create/Edit modal state
+  const [name,setName]=useState("");
+  const [desc,setDesc]=useState("");
+  const [color,setColor]=useState("indigo");
+  const [saving,setSaving]=useState(false);
+  const [formErr,setFormErr]=useState("");
+
+  const fetchRoles=useCallback(()=>{
+    setLoading(true);
+    fetch("/api/admin/roles").then(r=>r.json()).then(d=>setRoles(d.roles||[])).finally(()=>setLoading(false));
+  },[]);
+
+  useEffect(()=>{fetchRoles();},[fetchRoles]);
+
+  function openCreate(){setName("");setDesc("");setColor("indigo");setFormErr("");setShowCreate(true);setEditRole(null);}
+  function openEdit(r:Role){setName(r.name);setDesc(r.description);setColor(r.color);setFormErr("");setEditRole(r);setShowCreate(true);}
+
+  async function saveRole(){
+    if(!name.trim()){setFormErr("Name required.");return;}
+    setSaving(true);setFormErr("");
+    const url=editRole?`/api/admin/roles/${editRole.id}`:"/api/admin/roles";
+    const method=editRole?"PUT":"POST";
+    try{
+      const r=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name.trim(),description:desc,color})});
+      if(r.ok){setShowCreate(false);fetchRoles();}
+      else{const d=await r.json();setFormErr(d.error||"Failed");}
+    }catch(e){setFormErr(String(e));}
+    setSaving(false);
+  }
+
+  async function deleteRole(id:string){
+    await fetch(`/api/admin/roles/${id}`,{method:"DELETE"});
+    setDeletingId(null);fetchRoles();
+  }
+
+  async function loadMembers(id:string){
+    const r=await fetch(`/api/admin/roles/${id}/members`);
+    const d=await r.json();
+    setMembers(m=>({...m,[id]:d.members||[]}));
+  }
+
+  function toggleExpand(id:string){
+    if(expanded===id){setExpanded(null);}
+    else{setExpanded(id);loadMembers(id);}
+  }
+
+  async function addMember(roleId:string){
+    if(!newEmail.trim())return;
+    setErr("");
+    const r=await fetch(`/api/admin/roles/${roleId}/members`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:newEmail.trim()})});
+    if(r.ok){setNewEmail("");setAddingTo(null);loadMembers(roleId);}
+    else{const d=await r.json();setErr(d.error||"Failed");}
+  }
+
+  async function removeMember(roleId:string,email:string){
+    await fetch(`/api/admin/roles/${roleId}/members?email=${encodeURIComponent(email)}`,{method:"DELETE"});
+    loadMembers(roleId);
+  }
+
+  if(loading)return <div className="flex justify-center py-12"><Spinner/></div>;
+
+  return <>
+    {showCreate&&<Modal title={editRole?"Edit Role":"New Role"} onClose={()=>setShowCreate(false)}>
+      <div className="space-y-4">
+        {formErr&&<ErrBox msg={formErr}/>}
+        <FG label="Role Name" req><FIn value={name} onChange={setName} placeholder="e.g. MLRO"/></FG>
+        <FG label="Description"><FTa value={desc} onChange={setDesc} placeholder="What this role can do…" rows={2}/></FG>
+        <FG label="Color">
+          <div className="flex gap-2 flex-wrap mt-1">
+            {ROLE_COLORS.map(c=><button key={c} onClick={()=>setColor(c)} className={`w-6 h-6 rounded-full border-2 cursor-pointer transition-all ${color===c?"border-white scale-110":"border-transparent"} bg-${c}-500`}/>)}
+          </div>
+          <div className="mt-2"><RoleBadge name={name||"Preview"} color={color}/></div>
+        </FG>
+        <div className="flex gap-2 pt-2">
+          <Button variant="outline" onClick={()=>setShowCreate(false)} className="border-zinc-700 text-zinc-400 h-8 text-xs">Cancel</Button>
+          <Button onClick={saveRole} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex-1 disabled:opacity-50">
+            {saving?<Spinner/>:editRole?"Save Changes":"Create Role"}
+          </Button>
+        </div>
+      </div>
+    </Modal>}
+
+    {deletingId&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm space-y-4">
+        <p className="text-white font-bold text-sm">Delete Role?</p>
+        <p className="text-zinc-400 text-xs">Users with this role will lose it. Approver templates linked to this role will be unlinked.</p>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={()=>setDeletingId(null)} className="border-zinc-700 text-zinc-400 h-8 text-xs flex-1">Cancel</Button>
+          <Button onClick={()=>deleteRole(deletingId)} className="bg-red-600 hover:bg-red-700 h-8 text-xs flex-1">Delete</Button>
+        </div>
+      </div>
+    </div>}
+
+    <div className="flex items-center justify-between mb-4">
+      <p className="text-xs text-zinc-500">{roles.length} roles configured</p>
+      <Button onClick={openCreate} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>New Role</Button>
+    </div>
+
+    {roles.length===0&&<div className="text-zinc-600 text-xs text-center py-8 rounded-xl border border-dashed border-zinc-800">No roles yet. Create the first one.</div>}
+
+    <div className="space-y-2">
+      {roles.map(r=><div key={r.id} className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-3.5">
+          <div className={`w-2.5 h-2.5 rounded-full bg-${r.color}-400 shrink-0`}/>
+          <div className="flex-1 min-w-0 cursor-pointer" onClick={()=>toggleExpand(r.id)}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <RoleBadge name={r.name} color={r.color}/>
+              <span className="text-zinc-500 text-[10px]">{r.userCount} user{r.userCount!==1?"s":""}</span>
+              {r.description&&<span className="text-zinc-600 text-[10px] truncate max-w-xs">{r.description}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={()=>openEdit(r)} className="p-1.5 text-zinc-500 hover:text-indigo-400 cursor-pointer rounded-lg hover:bg-zinc-800"><FileText className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setDeletingId(r.id)} className="p-1.5 text-zinc-500 hover:text-red-400 cursor-pointer rounded-lg hover:bg-zinc-800"><XCircle className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>toggleExpand(r.id)} className="p-1.5 text-zinc-500 cursor-pointer rounded-lg hover:bg-zinc-800">
+              {expanded===r.id?<ChevronDown className="w-4 h-4"/>:<ChevronRight className="w-4 h-4"/>}
+            </button>
+          </div>
+        </div>
+
+        {expanded===r.id&&<div className="border-t border-zinc-800 px-5 pb-4">
+          <p className="text-xs font-semibold text-zinc-300 mt-3 mb-2">Users with this role</p>
+          {err&&<ErrBox msg={err}/>}
+          {(members[r.id]||[]).length===0&&<p className="text-zinc-600 text-[10px] mb-2">No users assigned.</p>}
+          <div className="space-y-1 mb-3">
+            {(members[r.id]||[]).map(m=><div key={m.email} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-zinc-800/50 border border-zinc-800">
+              <span className="text-xs text-zinc-200">{m.email}</span>
+              <button onClick={()=>removeMember(r.id,m.email)} className="text-zinc-600 hover:text-red-400 cursor-pointer p-1"><X className="w-3 h-3"/></button>
+            </div>)}
+          </div>
+          {addingTo===r.id
+            ?<div className="flex gap-2">
+              <FIn value={newEmail} onChange={setNewEmail} placeholder="user@example.com"/>
+              <Button onClick={()=>addMember(r.id)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3">Add</Button>
+              <button onClick={()=>{setAddingTo(null);setNewEmail("");}} className="text-zinc-500 hover:text-white cursor-pointer"><X className="w-4 h-4"/></button>
+            </div>
+            :<button onClick={()=>setAddingTo(r.id)} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer px-2 py-1 rounded-lg hover:bg-indigo-500/10 transition-colors">
+              <Plus className="w-3 h-3"/>Assign User
+            </button>
+          }
+        </div>}
+      </div>)}
+    </div>
+  </>;
+}
+
+// ─── DEPARTMENTS PANEL ────────────────────────────────────────────────────────
+function DepartmentsPanel({allRoles}:{allRoles:Role[]}){
+  const [depts,setDepts]=useState<OrgDept[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [expanded,setExpanded]=useState<string|null>(null);
+  const [showCreate,setShowCreate]=useState(false);
+  const [editDept,setEditDept]=useState<OrgDept|null>(null);
+  const [deletingId,setDeletingId]=useState<string|null>(null);
+  const [name,setName]=useState("");
+  const [desc,setDesc]=useState("");
+  const [head,setHead]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [formErr,setFormErr]=useState("");
+  const [addType,setAddType]=useState<"user"|"role">("user");
+  const [addRef,setAddRef]=useState("");
+  const [addingTo,setAddingTo]=useState<string|null>(null);
+
+  const fetchDepts=useCallback(()=>{
+    setLoading(true);
+    fetch("/api/admin/org-departments").then(r=>r.json()).then(d=>setDepts(d.departments||[])).finally(()=>setLoading(false));
+  },[]);
+
+  useEffect(()=>{fetchDepts();},[fetchDepts]);
+
+  function openCreate(){setName("");setDesc("");setHead("");setFormErr("");setShowCreate(true);setEditDept(null);}
+  function openEdit(d:OrgDept){setName(d.name);setDesc(d.description);setHead(d.headEmail);setFormErr("");setEditDept(d);setShowCreate(true);}
+
+  async function saveDept(){
+    if(!name.trim()){setFormErr("Name required.");return;}
+    setSaving(true);setFormErr("");
+    const url=editDept?`/api/admin/org-departments/${editDept.id}`:"/api/admin/org-departments";
+    const method=editDept?"PUT":"POST";
+    try{
+      const r=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name.trim(),description:desc,headEmail:head})});
+      if(r.ok){setShowCreate(false);fetchDepts();}
+      else{const d=await r.json();setFormErr(d.error||"Failed");}
+    }catch(e){setFormErr(String(e));}
+    setSaving(false);
+  }
+
+  async function deleteDept(id:string){
+    await fetch(`/api/admin/org-departments/${id}`,{method:"DELETE"});
+    setDeletingId(null);fetchDepts();
+  }
+
+  async function addMember(deptId:string){
+    if(!addRef.trim())return;
+    await fetch(`/api/admin/org-departments/${deptId}/members`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:addType,ref:addRef.trim()})});
+    setAddRef("");setAddingTo(null);fetchDepts();
+  }
+
+  async function removeMember(deptId:string,type:string,ref:string){
+    await fetch(`/api/admin/org-departments/${deptId}/members?type=${type}&ref=${encodeURIComponent(ref)}`,{method:"DELETE"});
+    fetchDepts();
+  }
+
+  if(loading)return <div className="flex justify-center py-12"><Spinner/></div>;
+
+  return <>
+    {showCreate&&<Modal title={editDept?"Edit Department":"New Department"} onClose={()=>setShowCreate(false)}>
+      <div className="space-y-4">
+        {formErr&&<ErrBox msg={formErr}/>}
+        <FG label="Name" req><FIn value={name} onChange={setName} placeholder="e.g. AML Team"/></FG>
+        <FG label="Description"><FTa value={desc} onChange={setDesc} placeholder="Responsibilities…" rows={2}/></FG>
+        <FG label="Department Head (email)"><FIn value={head} onChange={setHead} placeholder="head@example.com (optional)"/></FG>
+        <div className="flex gap-2 pt-2">
+          <Button variant="outline" onClick={()=>setShowCreate(false)} className="border-zinc-700 text-zinc-400 h-8 text-xs">Cancel</Button>
+          <Button onClick={saveDept} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex-1 disabled:opacity-50">
+            {saving?<Spinner/>:editDept?"Save Changes":"Create Department"}
+          </Button>
+        </div>
+      </div>
+    </Modal>}
+
+    {deletingId&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm space-y-4">
+        <p className="text-white font-bold text-sm">Delete Department?</p>
+        <p className="text-zinc-400 text-xs">This removes the department and all its member assignments. Case types with this department will retain their department label.</p>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={()=>setDeletingId(null)} className="border-zinc-700 text-zinc-400 h-8 text-xs flex-1">Cancel</Button>
+          <Button onClick={()=>deleteDept(deletingId)} className="bg-red-600 hover:bg-red-700 h-8 text-xs flex-1">Delete</Button>
+        </div>
+      </div>
+    </div>}
+
+    <div className="flex items-center justify-between mb-4">
+      <p className="text-xs text-zinc-500">{depts.length} departments · members impact approval routing</p>
+      <Button onClick={openCreate} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/>New Department</Button>
+    </div>
+
+    {depts.length===0&&<div className="text-zinc-600 text-xs text-center py-8 rounded-xl border border-dashed border-zinc-800">No departments yet.</div>}
+
+    <div className="space-y-2">
+      {depts.map(d=>{
+        const userMembers=d.members.filter(m=>m.type==="user");
+        const roleMembers=d.members.filter(m=>m.type==="role");
+        return <div key={d.id} className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+          <div className="flex items-center gap-3 px-5 py-3.5">
+            <div className="flex-1 min-w-0 cursor-pointer" onClick={()=>setExpanded(expanded===d.id?null:d.id)}>
+              <p className="text-white text-sm font-semibold">{d.name}</p>
+              <div className="flex items-center gap-3 mt-0.5 text-[10px] text-zinc-500">
+                {d.headEmail&&<span>Head: {d.headEmail}</span>}
+                <span>{userMembers.length} user{userMembers.length!==1?"s":""}</span>
+                <span>{roleMembers.length} role{roleMembers.length!==1?"s":""}</span>
+                {d.description&&<span className="truncate max-w-xs">{d.description}</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button onClick={()=>openEdit(d)} className="p-1.5 text-zinc-500 hover:text-indigo-400 cursor-pointer rounded-lg hover:bg-zinc-800"><FileText className="w-3.5 h-3.5"/></button>
+              <button onClick={()=>setDeletingId(d.id)} className="p-1.5 text-zinc-500 hover:text-red-400 cursor-pointer rounded-lg hover:bg-zinc-800"><XCircle className="w-3.5 h-3.5"/></button>
+              <button onClick={()=>setExpanded(expanded===d.id?null:d.id)} className="p-1.5 text-zinc-500 cursor-pointer rounded-lg hover:bg-zinc-800">
+                {expanded===d.id?<ChevronDown className="w-4 h-4"/>:<ChevronRight className="w-4 h-4"/>}
+              </button>
+            </div>
+          </div>
+
+          {expanded===d.id&&<div className="border-t border-zinc-800 px-5 pb-4">
+            <div className="grid sm:grid-cols-2 gap-4 mt-3">
+              <div>
+                <p className="text-[10px] font-semibold text-zinc-400 mb-2">Users</p>
+                {userMembers.length===0&&<p className="text-zinc-600 text-[10px]">No users assigned.</p>}
+                <div className="space-y-1">
+                  {userMembers.map(m=><div key={m.ref} className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-800">
+                    <span className="text-xs text-zinc-200">{m.ref}</span>
+                    <button onClick={()=>removeMember(d.id,"user",m.ref)} className="text-zinc-600 hover:text-red-400 cursor-pointer p-1"><X className="w-3 h-3"/></button>
+                  </div>)}
+                </div>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-zinc-400 mb-2">Roles</p>
+                {roleMembers.length===0&&<p className="text-zinc-600 text-[10px]">No roles assigned.</p>}
+                <div className="space-y-1">
+                  {roleMembers.map(m=>{
+                    const role=allRoles.find(r=>r.id===m.ref);
+                    return <div key={m.ref} className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-800">
+                      <RoleBadge name={role?.name??m.ref} color={role?.color}/>
+                      <button onClick={()=>removeMember(d.id,"role",m.ref)} className="text-zinc-600 hover:text-red-400 cursor-pointer p-1"><X className="w-3 h-3"/></button>
+                    </div>;
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-zinc-800/60">
+              {addingTo===d.id
+                ?<div className="flex gap-2 items-center flex-wrap">
+                  <select value={addType} onChange={e=>setAddType(e.target.value as "user"|"role")} className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none">
+                    <option value="user">User</option><option value="role">Role</option>
+                  </select>
+                  {addType==="role"
+                    ?<select value={addRef} onChange={e=>setAddRef(e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none">
+                      <option value="">Select role…</option>
+                      {allRoles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                    :<FIn value={addRef} onChange={setAddRef} placeholder="user@example.com"/>
+                  }
+                  <Button onClick={()=>addMember(d.id)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3">Add</Button>
+                  <button onClick={()=>{setAddingTo(null);setAddRef("");}} className="text-zinc-500 hover:text-white cursor-pointer"><X className="w-4 h-4"/></button>
+                </div>
+                :<button onClick={()=>setAddingTo(d.id)} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer px-2 py-1 rounded-lg hover:bg-indigo-500/10">
+                  <Plus className="w-3 h-3"/>Add Member
+                </button>
+              }
+            </div>
+          </div>}
+        </div>;
+      })}
+    </div>
   </>;
 }
 
@@ -553,32 +1089,181 @@ function AnalyticsPanel(){
   </div>;
 }
 
-// ─── CASE TYPES PANEL ─────────────────────────────────────────────────────────
-// ─── FIELD TYPES ─────────────────────────────────────────────────────────────
-const FIELD_TYPES = [
-  {value:"text",label:"Text"},
-  {value:"textarea",label:"Long Text"},
-  {value:"number",label:"Number"},
-  {value:"currency",label:"Currency"},
-  {value:"date",label:"Date"},
-  {value:"email",label:"Email"},
-  {value:"phone",label:"Phone"},
-  {value:"url",label:"URL"},
-  {value:"dropdown",label:"Dropdown"},
-  {value:"boolean",label:"Yes / No"},
-];
-const REQUIRED_AT_OPTS = ["create","complete","close","optional"];
+// ─── FLOW BUILDER ─────────────────────────────────────────────────────────────
+function FlowBuilder({caseTypeId}:{caseTypeId:string}){
+  const [transitions,setTransitions]=useState<FlowTransition[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState("");
+  const [saved,setSaved]=useState(false);
 
-// ─── ADD / EDIT FIELD FORM ────────────────────────────────────────────────────
-function FieldForm({
-  caseTypeId, existing, allFields, onDone, onCancel,
-}:{
-  caseTypeId:string;
-  existing?:CustomField;
-  allFields:CustomField[];
-  onDone:()=>void;
-  onCancel:()=>void;
-}){
+  useEffect(()=>{
+    setLoading(true);
+    fetch(`/api/admin/case-types/${caseTypeId}/transitions`)
+      .then(r=>r.json())
+      .then(d=>{
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setTransitions((d.transitions||[]).map((t:any)=>({from:t.from as CaseStatus,to:t.to as CaseStatus,requiresReason:!!t.requiresReason})));
+      })
+      .catch(()=>{})
+      .finally(()=>setLoading(false));
+  },[caseTypeId]);
+
+  function toggle(from:CaseStatus,to:CaseStatus){
+    setTransitions(prev=>{
+      const exists=prev.some(t=>t.from===from&&t.to===to);
+      if(exists) return prev.filter(t=>!(t.from===from&&t.to===to));
+      return [...prev,{from,to,requiresReason:false}];
+    });
+    setSaved(false);
+  }
+
+  function toggleReason(from:CaseStatus,to:CaseStatus,e:React.MouseEvent){
+    e.stopPropagation();
+    setTransitions(prev=>prev.map(t=>t.from===from&&t.to===to?{...t,requiresReason:!t.requiresReason}:t));
+    setSaved(false);
+  }
+
+  function isEnabled(from:CaseStatus,to:CaseStatus){return transitions.some(t=>t.from===from&&t.to===to);}
+  function needsReason(from:CaseStatus,to:CaseStatus){return transitions.find(t=>t.from===from&&t.to===to)?.requiresReason??false;}
+
+  async function save(){
+    setSaving(true); setErr(""); setSaved(false);
+    try {
+      const r=await fetch(`/api/admin/case-types/${caseTypeId}/transitions`,{
+        method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({transitions}),
+      });
+      if(!r.ok){const d=await r.json();setErr(d.error||"Failed");}
+      else setSaved(true);
+    } catch(e){setErr(String(e));}
+    setSaving(false);
+  }
+
+  if(loading) return <div className="py-4 flex justify-center"><Spinner/></div>;
+
+  return <div>
+    <div className="flex items-center justify-between mb-3">
+      <div>
+        <p className="text-[10px] text-zinc-600">Check each allowed transition. Click <span className="text-amber-400 font-mono">✱</span> on an enabled cell to require a reason.</p>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {err&&<span className="text-xs text-red-400">{err}</span>}
+        {saved&&!saving&&<span className="text-xs text-green-400">Saved</span>}
+        <Button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-7 text-xs px-3 disabled:opacity-50">
+          {saving?<Spinner/>:"Save Flow"}
+        </Button>
+      </div>
+    </div>
+    <div className="overflow-x-auto rounded-lg border border-zinc-800">
+      <table className="text-[10px] w-full">
+        <thead>
+          <tr className="bg-zinc-950/60 border-b border-zinc-800">
+            <th className="px-3 py-2 text-left text-zinc-500 font-medium w-28 whitespace-nowrap">From ↓ · To →</th>
+            {ALL_STATUSES.map(s=><th key={s} className="px-2 py-2 text-center text-zinc-500 font-medium whitespace-nowrap">{STATUS_META[s]?.label??s}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {ALL_STATUSES.map(from=><tr key={from} className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/20">
+            <td className="px-3 py-2 text-zinc-300 font-medium whitespace-nowrap">{STATUS_META[from]?.label??from}</td>
+            {ALL_STATUSES.map(to=><td key={to} className="px-2 py-1.5 text-center">
+              {from===to
+                ?<span className="text-zinc-800">—</span>
+                :<div className="flex flex-col items-center gap-0.5">
+                  <button
+                    onClick={()=>toggle(from,to)}
+                    className={`w-4 h-4 rounded border flex items-center justify-center cursor-pointer transition-colors ${isEnabled(from,to)?"bg-indigo-500 border-indigo-400 text-white":"border-zinc-700 hover:border-zinc-500"}`}
+                  >
+                    {isEnabled(from,to)&&<Check className="w-2.5 h-2.5"/>}
+                  </button>
+                  {isEnabled(from,to)&&<button
+                    onClick={e=>toggleReason(from,to,e)}
+                    title="Toggle: requires reason"
+                    className={`text-[9px] font-mono cursor-pointer leading-none transition-colors ${needsReason(from,to)?"text-amber-400":"text-zinc-700 hover:text-zinc-500"}`}
+                  >✱</button>}
+                </div>
+              }
+            </td>)}
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+// ─── APPROVER TEMPLATES ───────────────────────────────────────────────────────
+function ApproverTemplates({caseTypeId,approvalRequired,allRoles}:{caseTypeId:string;approvalRequired:boolean;allRoles:Role[]}){
+  const [approvers,setApprovers]=useState<ApproverTemplate[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [selectedRoleId,setSelectedRoleId]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState("");
+
+  const fetchApprovers=useCallback(()=>{
+    fetch(`/api/admin/case-types/${caseTypeId}/approvers`)
+      .then(r=>r.json())
+      .then(d=>setApprovers(d.approvers||[]))
+      .catch(()=>{})
+      .finally(()=>setLoading(false));
+  },[caseTypeId]);
+
+  useEffect(()=>{fetchApprovers();},[fetchApprovers]);
+
+  async function addApprover(){
+    if(!selectedRoleId) return;
+    const role=allRoles.find(r=>r.id===selectedRoleId);
+    if(!role) return;
+    setSaving(true); setErr("");
+    try {
+      const r=await fetch(`/api/admin/case-types/${caseTypeId}/approvers`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({roleId:selectedRoleId,displayName:role.name,role:role.name}),
+      });
+      if(r.ok){setSelectedRoleId("");fetchApprovers();}
+      else{const d=await r.json();setErr(d.error||"Failed");}
+    } catch(e){setErr(String(e));}
+    setSaving(false);
+  }
+
+  async function removeApprover(id:string){
+    await fetch(`/api/admin/case-types/${caseTypeId}/approvers/${id}`,{method:"DELETE"});
+    fetchApprovers();
+  }
+
+  const assignedRoleIds=new Set(approvers.map(a=>a.roleId).filter(Boolean));
+  const availableRoles=allRoles.filter(r=>!assignedRoleIds.has(r.id));
+
+  if(!approvalRequired) return <p className="text-[10px] text-zinc-600 mt-1">Enable "Approval Required" on this case type to configure approval levels.</p>;
+  if(loading) return <div className="py-2 flex"><Spinner/></div>;
+
+  return <div className="space-y-2">
+    <p className="text-[10px] text-zinc-500">Each level is an ordered gate. All must approve before the case can close. Users with the linked role see the case highlighted in their queue.</p>
+    {err&&<ErrBox msg={err}/>}
+    {approvers.length===0&&<p className="text-[10px] text-zinc-600">No approval levels configured. Add roles below to define the approval chain.</p>}
+    {approvers.map((a,i)=><div key={a.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 px-3 py-2.5 bg-zinc-950/30">
+      <span className="text-[10px] text-zinc-600 w-5 text-center font-mono font-bold">{i+1}</span>
+      <div className="flex-1 min-w-0 flex items-center gap-2">
+        <RoleBadge name={a.name} color={a.roleColor}/>
+        {!a.roleId&&<span className="text-[10px] text-zinc-600">(legacy — no role linked)</span>}
+      </div>
+      <button onClick={()=>removeApprover(a.id)} className="text-zinc-600 hover:text-red-400 cursor-pointer p-1 rounded hover:bg-zinc-800 transition-colors">
+        <X className="w-3 h-3"/>
+      </button>
+    </div>)}
+    <div className="flex gap-2 mt-2 pt-2 border-t border-zinc-800/60">
+      <select value={selectedRoleId} onChange={e=>setSelectedRoleId(e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+        <option value="">Select role for next approval level…</option>
+        {availableRoles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+      </select>
+      <Button onClick={addApprover} disabled={saving||!selectedRoleId} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs px-3 shrink-0 disabled:opacity-50">
+        {saving?<Spinner/>:<Plus className="w-3.5 h-3.5"/>}
+      </Button>
+    </div>
+  </div>;
+}
+
+// ─── FIELD FORM ───────────────────────────────────────────────────────────────
+function FieldForm({caseTypeId,existing,allFields,onDone,onCancel}:{caseTypeId:string;existing?:CustomField;allFields:CustomField[];onDone:()=>void;onCancel:()=>void}){
   const [label,setLabel]=useState(existing?.label??"");
   const [key,setKey]=useState(existing?.key??"");
   const [type,setType]=useState(existing?.type??"text");
@@ -595,24 +1280,17 @@ function FieldForm({
     if(!label.trim()||!key.trim()){setErr("Label and key are required.");return;}
     setSaving(true); setErr("");
     const body:{label:string;key?:string;type:string;requiredAt:string;options:string[];conditionalOn:{key:string;value:string}|null}={
-      label:label.trim(),
-      type,
+      label:label.trim(), type,
       requiredAt,
-      options: type==="dropdown"?optionsRaw.split(",").map(s=>s.trim()).filter(Boolean):[],
-      conditionalOn: condKey&&condVal?{key:condKey,value:condVal}:null,
+      options:type==="dropdown"?optionsRaw.split(",").map(s=>s.trim()).filter(Boolean):[],
+      conditionalOn:condKey&&condVal?{key:condKey,value:condVal}:null,
     };
     try {
       let r;
       if(existing?.id){
-        r=await fetch(`/api/admin/case-types/${caseTypeId}/fields/${existing.id}`,{
-          method:"PUT",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify(body),
-        });
+        r=await fetch(`/api/admin/case-types/${caseTypeId}/fields/${existing.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
       } else {
-        r=await fetch(`/api/admin/case-types/${caseTypeId}/fields`,{
-          method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({...body,key:key.trim()}),
-        });
+        r=await fetch(`/api/admin/case-types/${caseTypeId}/fields`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...body,key:key.trim()})});
       }
       if(!r.ok){const d=await r.json();setErr(d.error||"Failed");setSaving(false);return;}
       onDone();
@@ -623,12 +1301,8 @@ function FieldForm({
     <p className="text-xs font-semibold text-indigo-400">{existing?"Edit Field":"Add Field"}</p>
     {err&&<ErrBox msg={err}/>}
     <div className="grid grid-cols-2 gap-3">
-      <FG label="Label" req>
-        <FIn value={label} onChange={v=>{setLabel(v);if(!existing)setKey(derivedKey(v));}} placeholder="e.g. Alert Type"/>
-      </FG>
-      <FG label="Key (snake_case)" req>
-        <FIn value={key} onChange={setKey} placeholder="alert_type" disabled={!!existing}/>
-      </FG>
+      <FG label="Label" req><FIn value={label} onChange={v=>{setLabel(v);if(!existing)setKey(derivedKey(v));}} placeholder="e.g. Alert Type"/></FG>
+      <FG label="Key (snake_case)" req><FIn value={key} onChange={setKey} placeholder="alert_type" disabled={!!existing}/></FG>
     </div>
     <div className="grid grid-cols-2 gap-3">
       <FG label="Field Type">
@@ -642,9 +1316,7 @@ function FieldForm({
         </select>
       </FG>
     </div>
-    {type==="dropdown"&&<FG label="Options (comma-separated)">
-      <FIn value={optionsRaw} onChange={setOptionsRaw} placeholder="Option A, Option B, Option C"/>
-    </FG>}
+    {type==="dropdown"&&<FG label="Options (comma-separated)"><FIn value={optionsRaw} onChange={setOptionsRaw} placeholder="Option A, Option B, Option C"/></FG>}
     <div className="grid grid-cols-2 gap-3">
       <FG label="Show only when field…">
         <select value={condKey} onChange={e=>setCondKey(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
@@ -652,9 +1324,7 @@ function FieldForm({
           {allFields.filter(f=>f.key!==key).map(f=><option key={f.key} value={f.key}>{f.label}</option>)}
         </select>
       </FG>
-      {condKey&&<FG label="…equals">
-        <FIn value={condVal} onChange={setCondVal} placeholder="value"/>
-      </FG>}
+      {condKey&&<FG label="…equals"><FIn value={condVal} onChange={setCondVal} placeholder="value"/></FG>}
     </div>
     <div className="flex gap-2 pt-1">
       <Button variant="outline" onClick={onCancel} className="border-zinc-700 text-zinc-400 h-7 text-xs px-3">Cancel</Button>
@@ -666,25 +1336,37 @@ function FieldForm({
 }
 
 // ─── CREATE / EDIT CASE TYPE MODAL ────────────────────────────────────────────
-function CaseTypeModal({
-  existing, onClose, onSaved,
-}:{
-  existing?:CaseType|null;
-  onClose:()=>void;
-  onSaved:()=>void;
-}){
+function CaseTypeModal({existing,allRoles,onClose,onSaved}:{existing?:CaseType|null;allRoles:Role[];onClose:()=>void;onSaved:()=>void}){
+  const [step,setStep]=useState(1);
+  // Step 1 – Identity
   const [name,setName]=useState(existing?.name??"");
+  const [desc,setDesc]=useState(existing?.description??"");
   const [dept,setDept]=useState<Department>(existing?.department??"AML");
+  const [priority,setPriority]=useState(existing?.priority??"medium");
+  const [color,setColor]=useState(existing?.color??"indigo");
   const [trigger,setTrigger]=useState(existing?.triggerType??"manual");
-  const [approval,setApproval]=useState(existing?.approvalRequired??false);
+  // Step 2 – Operations
   const [slaDays,setSlaDays]=useState(String(existing?.sla?.slaDays??5));
+  const [escalationDays,setEscalationDays]=useState(String(existing?.sla?.escalationDays??""));
+  const [escalateTo,setEscalateTo]=useState(existing?.sla?.escalateTo??"");
+  const [approval,setApproval]=useState(existing?.approvalRequired??false);
+  const [allowedRoles,setAllowedRoles]=useState<string[]>(existing?.allowedInitiatorRoles??[]);
   const [saving,setSaving]=useState(false);
   const [err,setErr]=useState("");
+
+  function toggleAllowedRole(id:string){
+    setAllowedRoles(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
+  }
 
   async function save(){
     if(!name.trim()){setErr("Name is required.");return;}
     setSaving(true); setErr("");
-    const body={name:name.trim(),department:dept,approvalRequired:approval,triggerType:trigger,slaDays:Number(slaDays)||5};
+    const body={
+      name:name.trim(),description:desc,department:dept,approvalRequired:approval,
+      triggerType:trigger,slaDays:Number(slaDays)||5,
+      escalationDays:escalationDays?Number(escalationDays):null,
+      escalateTo:escalateTo||null,priority,color,allowedInitiatorRoles:allowedRoles,
+    };
     try {
       const r=existing
         ? await fetch(`/api/admin/case-types/${existing.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
@@ -694,42 +1376,74 @@ function CaseTypeModal({
     } catch(e){setErr(String(e));setSaving(false);}
   }
 
-  return <Modal title={existing?"Edit Case Type":"New Case Type"} onClose={onClose}>
-    <div className="space-y-4">
-      {err&&<ErrBox msg={err}/>}
+  return <Modal title={existing?"Edit Case Type":"New Case Type"} onClose={onClose} wide>
+    <div className="flex gap-2 mb-5">{[1,2].map(s=><div key={s} className={`flex-1 h-1 rounded-full ${step>=s?"bg-indigo-500":"bg-zinc-700"}`}/>)}</div>
+    {err&&<ErrBox msg={err}/>}
+
+    {step===1&&<div className="space-y-4">
       <FG label="Name" req><FIn value={name} onChange={setName} placeholder="e.g. Sanctions Alert"/></FG>
+      <FG label="Description / Purpose"><FTa value={desc} onChange={setDesc} placeholder="What this case type is used for…" rows={2}/></FG>
       <div className="grid grid-cols-2 gap-3">
-        <FG label="Department">
-          <FSel value={dept} onChange={v=>setDept(v as Department)} opts={[...DEPARTMENTS]}/>
-        </FG>
-        <FG label="Trigger">
-          <FSel value={trigger} onChange={setTrigger} opts={["manual","auto","api"]}/>
-        </FG>
+        <FG label="Department"><FSel value={dept} onChange={v=>setDept(v as Department)} opts={[...DEPARTMENTS]}/></FG>
+        <FG label="Trigger"><FSel value={trigger} onChange={setTrigger} opts={["manual","auto","api"]}/></FG>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <FG label="SLA (days)">
-          <FIn value={slaDays} onChange={setSlaDays} type="number"/>
+        <FG label="Priority">
+          <select value={priority} onChange={e=>setPriority(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white h-8 focus:outline-none focus:border-indigo-500">
+            {PRIORITIES.map(p=><option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
+          </select>
         </FG>
-        <FG label="Approval Required">
-          <label className="flex items-center gap-2 h-8 cursor-pointer">
-            <input type="checkbox" checked={approval} onChange={e=>setApproval(e.target.checked)} className="accent-indigo-500 w-4 h-4"/>
-            <span className="text-xs text-zinc-400">Requires maker/checker</span>
-          </label>
+        <FG label="Color">
+          <div className="flex gap-1.5 flex-wrap items-center h-8">
+            {ROLE_COLORS.map(c=><button key={c} onClick={()=>setColor(c)} title={c} className={`w-5 h-5 rounded-full border-2 cursor-pointer transition-all bg-${c}-500 ${color===c?"border-white scale-110":"border-transparent"}`}/>)}
+          </div>
         </FG>
       </div>
       <div className="flex gap-2 pt-2">
         <Button variant="outline" onClick={onClose} className="border-zinc-700 text-zinc-400 h-8 text-xs">Cancel</Button>
+        <Button onClick={()=>setStep(2)} disabled={!name.trim()} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex-1 disabled:opacity-50">Next — Operations</Button>
+      </div>
+    </div>}
+
+    {step===2&&<div className="space-y-4">
+      <div className="rounded-lg bg-zinc-800/50 p-3 text-xs flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full bg-${color}-400`}/>
+        <span className="text-white font-medium">{name}</span>
+        <DeptBadge dept={dept}/>
+        <span className={`text-[10px] font-semibold ${PRIORITY_META[priority]?.color??""}`}>{PRIORITY_META[priority]?.label}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <FG label="SLA (days)" req><FIn value={slaDays} onChange={setSlaDays} type="number"/></FG>
+        <FG label="Escalation after (days)"><FIn value={escalationDays} onChange={setEscalationDays} type="number" placeholder="optional"/></FG>
+        <FG label="Escalate to (dept)"><FIn value={escalateTo} onChange={setEscalateTo} placeholder="e.g. AML"/></FG>
+      </div>
+      <FG label="Approval Required">
+        <label className="flex items-center gap-2 h-8 cursor-pointer">
+          <input type="checkbox" checked={approval} onChange={e=>setApproval(e.target.checked)} className="accent-indigo-500 w-4 h-4"/>
+          <span className="text-xs text-zinc-400">Requires maker/checker approval to close</span>
+        </label>
+      </FG>
+      {allRoles.length>0&&<FG label="Allowed Initiator Roles (leave empty = anyone)">
+        <div className="flex flex-wrap gap-2 mt-1">
+          {allRoles.map(r=><button key={r.id} onClick={()=>toggleAllowedRole(r.id)} className={`px-2.5 py-1 rounded-full text-[10px] font-medium border cursor-pointer transition-colors ${allowedRoles.includes(r.id)?COLOR_CLASSES[r.color]??"bg-indigo-500/15 text-indigo-400 border-indigo-500/30":"border-zinc-700 text-zinc-500 hover:border-zinc-500"}`}>
+            {r.name}
+          </button>)}
+        </div>
+      </FG>}
+      <div className="flex gap-2 pt-2">
+        <Button variant="outline" onClick={()=>setStep(1)} className="border-zinc-700 text-zinc-400 h-8 text-xs">Back</Button>
         <Button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex-1 disabled:opacity-50">
           {saving?<span className="flex items-center gap-2"><Spinner/>{existing?"Saving…":"Creating…"}</span>:existing?"Save Changes":"Create Case Type"}
         </Button>
       </div>
-    </div>
+    </div>}
   </Modal>;
 }
 
 // ─── CASE TYPES PANEL ─────────────────────────────────────────────────────────
-function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()=>void}){
+function CaseTypesPanel({caseTypes,allRoles,onRefresh}:{caseTypes:CaseType[];allRoles:Role[];onRefresh:()=>void}){
   const [exp,setExp]=useState<string|null>(null);
+  const [expSection,setExpSection]=useState<"fields"|"flow"|"approvers">("fields");
   const [showCreate,setShowCreate]=useState(false);
   const [editing,setEditing]=useState<CaseType|null>(null);
   const [deletingId,setDeletingId]=useState<string|null>(null);
@@ -764,13 +1478,17 @@ function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()
     onRefresh();
   }
 
+  function expand(id:string){
+    if(exp===id){setExp(null);}
+    else{setExp(id);setExpSection("fields");setAddFieldFor(null);setEditField(null);}
+  }
+
   if(caseTypes.length===0) return <div className="text-zinc-600 text-xs text-center py-8">Loading case types…</div>;
 
   return <>
-    {showCreate&&<CaseTypeModal onClose={()=>setShowCreate(false)} onSaved={onRefresh}/>}
-    {editing&&<CaseTypeModal existing={editing} onClose={()=>setEditing(null)} onSaved={onRefresh}/>}
+    {showCreate&&<CaseTypeModal allRoles={allRoles} onClose={()=>setShowCreate(false)} onSaved={onRefresh}/>}
+    {editing&&<CaseTypeModal existing={editing} allRoles={allRoles} onClose={()=>setEditing(null)} onSaved={onRefresh}/>}
 
-    {/* Delete confirm */}
     {deletingId&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm space-y-4">
         <p className="text-white font-bold text-sm">Delete Case Type?</p>
@@ -798,9 +1516,11 @@ function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()
         {/* Header row */}
         <div className="flex items-center gap-2 px-5 py-3.5">
           <div className={`w-2 h-2 rounded-full shrink-0 ${t.active?"bg-green-400":"bg-zinc-600"}`}/>
-          <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0 cursor-pointer" onClick={()=>setExp(exp===t.id?null:t.id)}>
+          <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0 cursor-pointer" onClick={()=>expand(t.id)}>
+            <div className={`w-2 h-2 rounded-full bg-${t.color??"indigo"}-400 shrink-0`}/>
             <p className="text-white text-sm font-semibold">{t.name}</p>
             <DeptBadge dept={t.department}/>
+            {t.priority&&t.priority!=="medium"&&<span className={`text-[10px] font-semibold ${PRIORITY_META[t.priority]?.color??""}`}>{PRIORITY_META[t.priority]?.label}</span>}
             {t.approvalRequired&&<Badge variant="outline" className="text-[10px] border-orange-500/30 text-orange-400">Approval Required</Badge>}
             <Badge variant="outline" className="text-[10px] border-zinc-700 text-zinc-500">v{t.version}</Badge>
             {t.triggerType!=="manual"&&<Badge variant="outline" className="text-[10px] border-blue-500/30 text-blue-400 capitalize">{t.triggerType}</Badge>}
@@ -814,7 +1534,7 @@ function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()
             <button onClick={()=>{setDeletingId(t.id);setDeleteMsg("");}} className="p-1.5 text-zinc-500 hover:text-red-400 cursor-pointer rounded-lg hover:bg-zinc-800 transition-colors" title="Delete">
               <XCircle className="w-3.5 h-3.5"/>
             </button>
-            <button onClick={()=>setExp(exp===t.id?null:t.id)} className="p-1.5 text-zinc-500 cursor-pointer rounded-lg hover:bg-zinc-800">
+            <button onClick={()=>expand(t.id)} className="p-1.5 text-zinc-500 cursor-pointer rounded-lg hover:bg-zinc-800">
               {exp===t.id?<ChevronDown className="w-4 h-4"/>:<ChevronRight className="w-4 h-4"/>}
             </button>
           </div>
@@ -831,8 +1551,15 @@ function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()
             <span>Approval: <span className="text-zinc-400">{t.approvalRequired?"Yes":"No"}</span></span>
           </div>
 
+          {/* Sub-tabs */}
+          <div className="flex gap-0 border-b border-zinc-800/60 mt-3">
+            {[["fields","Fields"],["flow","Status Flow"],["approvers","Approval Levels"]].map(([id,label])=>(
+              <button key={id} onClick={()=>{setExpSection(id as "fields"|"flow"|"approvers");setAddFieldFor(null);setEditField(null);}} className={`px-4 py-2 text-[11px] font-medium border-b-2 cursor-pointer transition-colors ${expSection===id?"border-indigo-500 text-indigo-400":"border-transparent text-zinc-500 hover:text-zinc-300"}`}>{label}</button>
+            ))}
+          </div>
+
           {/* Fields section */}
-          <div className="mt-4">
+          {expSection==="fields"&&<div className="mt-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-zinc-300">Fields ({t.fields.filter(f=>f.active!==false).length})</p>
               <button
@@ -842,33 +1569,14 @@ function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()
                 <Plus className="w-3 h-3"/>{addFieldFor===t.id?"Cancel":"Add Field"}
               </button>
             </div>
-
-            {/* Add field form */}
-            {addFieldFor===t.id&&<FieldForm
-              caseTypeId={t.id}
-              allFields={t.fields}
-              onDone={()=>{setAddFieldFor(null);onRefresh();}}
-              onCancel={()=>setAddFieldFor(null)}
-            />}
-
-            {/* Edit field form */}
-            {editField?.typeId===t.id&&<FieldForm
-              caseTypeId={t.id}
-              existing={editField.field}
-              allFields={t.fields}
-              onDone={()=>{setEditField(null);onRefresh();}}
-              onCancel={()=>setEditField(null)}
-            />}
-
+            {addFieldFor===t.id&&<FieldForm caseTypeId={t.id} allFields={t.fields} onDone={()=>{setAddFieldFor(null);onRefresh();}} onCancel={()=>setAddFieldFor(null)}/>}
+            {editField?.typeId===t.id&&<FieldForm caseTypeId={t.id} existing={editField.field} allFields={t.fields} onDone={()=>{setEditField(null);onRefresh();}} onCancel={()=>setEditField(null)}/>}
             {t.fields.length===0&&!addFieldFor&&<p className="text-zinc-600 text-xs py-2">No fields yet. Add the first one above.</p>}
-
             {t.fields.length>0&&<div className="overflow-x-auto">
               <table className="w-full text-xs min-w-[600px] mt-1">
                 <thead>
                   <tr className="border-b border-zinc-800">
-                    {["","Key","Label","Type","Required At","Options / Condition",""].map((h,i)=>
-                      <th key={i} className={`pb-2 text-left text-zinc-500 font-medium ${i===0?"w-10":i===6?"w-20 text-right":"pr-3"}`}>{h}</th>
-                    )}
+                    {["","Key","Label","Type","Required At","Options / Condition",""].map((h,i)=><th key={i} className={`pb-2 text-left text-zinc-500 font-medium ${i===0?"w-10":i===6?"w-20 text-right":"pr-3"}`}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -883,12 +1591,7 @@ function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()
                     <td className="py-1.5 pr-3 text-zinc-200">{f.label}</td>
                     <td className="py-1.5 pr-3 text-zinc-400">{FIELD_TYPES.find(ft=>ft.value===f.type)?.label??f.type}</td>
                     <td className="py-1.5 pr-3">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
-                        f.requiredAt==="create"?"bg-red-500/15 text-red-300":
-                        f.requiredAt==="complete"?"bg-amber-500/15 text-amber-300":
-                        f.requiredAt==="close"?"bg-orange-500/15 text-orange-300":
-                        "bg-zinc-800 text-zinc-500"
-                      }`}>{f.requiredAt}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${f.requiredAt==="create"?"bg-red-500/15 text-red-300":f.requiredAt==="complete"?"bg-amber-500/15 text-amber-300":f.requiredAt==="close"?"bg-orange-500/15 text-orange-300":"bg-zinc-800 text-zinc-500"}`}>{f.requiredAt}</span>
                     </td>
                     <td className="py-1.5 pr-3 text-zinc-500 text-[10px]">
                       {f.type==="dropdown"&&f.options?.length?(f.options.slice(0,3).join(", ")+(f.options.length>3?` +${f.options.length-3}`:"")):""}
@@ -896,19 +1599,26 @@ function CaseTypesPanel({caseTypes,onRefresh}:{caseTypes:CaseType[];onRefresh:()
                     </td>
                     <td className="py-1.5 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={()=>{setEditField({typeId:t.id,field:f});setAddFieldFor(null);}} className="p-1 text-zinc-600 hover:text-indigo-400 cursor-pointer rounded hover:bg-zinc-800" title="Edit field">
-                          <FileText className="w-3 h-3"/>
-                        </button>
-                        <button onClick={()=>f.id&&deleteField(t.id,f.id)} className="p-1 text-zinc-600 hover:text-red-400 cursor-pointer rounded hover:bg-zinc-800" title="Delete field">
-                          <X className="w-3 h-3"/>
-                        </button>
+                        <button onClick={()=>{setEditField({typeId:t.id,field:f});setAddFieldFor(null);}} className="p-1 text-zinc-600 hover:text-indigo-400 cursor-pointer rounded hover:bg-zinc-800" title="Edit field"><FileText className="w-3 h-3"/></button>
+                        <button onClick={()=>f.id&&deleteField(t.id,f.id)} className="p-1 text-zinc-600 hover:text-red-400 cursor-pointer rounded hover:bg-zinc-800" title="Delete field"><X className="w-3 h-3"/></button>
                       </div>
                     </td>
                   </tr>)}
                 </tbody>
               </table>
             </div>}
-          </div>
+          </div>}
+
+          {/* Status Flow section */}
+          {expSection==="flow"&&<div className="mt-4">
+            <FlowBuilder caseTypeId={t.id}/>
+          </div>}
+
+          {/* Approval Levels section */}
+          {expSection==="approvers"&&<div className="mt-4">
+            <ApproverTemplates caseTypeId={t.id} approvalRequired={t.approvalRequired} allRoles={allRoles}/>
+          </div>}
+
         </div>}
       </div>)}
     </div>
@@ -922,6 +1632,9 @@ function CasesInner(){
   const [user,setUser]=useState<Record<string,unknown>|null>(null);
   const [cases,setCases]=useState<Case[]>([]);
   const [caseTypes,setCaseTypes]=useState<CaseType[]>([]);
+  const [allRoles,setAllRoles]=useState<Role[]>([]);
+  const [myRoleIds,setMyRoleIds]=useState<string[]>([]);
+  const [allUsers,setAllUsers]=useState<UserInfo[]>([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
   const [tab,setTab]=useState("cases");
@@ -960,11 +1673,19 @@ function CasesInner(){
     fetch("/api/case-types").then(async r=>{if(r.ok){const d=await r.json();setCaseTypes(d.caseTypes||[]);}}).catch(()=>{});
   },[]);
 
+  const fetchRoles=useCallback(()=>{
+    fetch("/api/admin/roles").then(async r=>{if(r.ok){const d=await r.json();setAllRoles(d.roles||[]);}}).catch(()=>{});
+    fetch("/api/admin/roles?mine=true").then(async r=>{if(r.ok){const d=await r.json();setMyRoleIds((d.roles||[]).map((x:{id:string})=>x.id));}}).catch(()=>{});
+  },[]);
+
   useEffect(()=>{
     fetch("/api/auth/me").then(async r=>{if(r.status===401){router.push("/login");return;}const d=await r.json();setUser(d.user);});
     fetchCaseTypes();
+    fetchRoles();
+    // load users for assignee picker
+    fetch("/api/admin/users").then(async r=>{if(r.ok){const d=await r.json();setAllUsers((d.users||[]).map((u:{id:string;email:string;display_name?:string})=>({id:u.id,email:u.email,displayName:u.display_name||u.email})));}}).catch(()=>{});
     if(params?.get("create")==="true")setShowCreate(true);
-  },[router,params,fetchCaseTypes]);
+  },[router,params,fetchCaseTypes,fetchRoles]);
 
   useEffect(()=>{fetchCases();},[fetchCases]);
 
@@ -972,6 +1693,13 @@ function CasesInner(){
   function toggleSelect(id:string){setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);}
 
   const openCount=cases.filter(c=>["new","active","rfi"].includes(c.status)).length;
+  const myApprovalCount=cases.filter(c=>c.status==="pending_approval"&&caseTypes.find(t=>t.id===c.typeId)?.approverTemplates?.some(at=>at.roleId&&myRoleIds.includes(at.roleId))).length;
+
+  function needsMyApproval(c:Case):boolean{
+    if(c.status!=="pending_approval")return false;
+    const ct=caseTypes.find(t=>t.id===c.typeId);
+    return ct?.approverTemplates?.some(at=>at.roleId&&myRoleIds.includes(at.roleId))??false;
+  }
 
   return <div className="min-h-screen bg-zinc-950 text-white">
     <DashNav user={user}/>
@@ -992,15 +1720,20 @@ function CasesInner(){
         </div>
       </div>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-0 overflow-x-auto" style={{scrollbarWidth:"none"}}>
-        {[["cases","Cases"],["analytics","Analytics"],["types","Case Types (Admin)"]].map(([id,label])=>
-          <button key={id} onClick={()=>setTab(id)} data-testid={`tab-${id}`} className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 cursor-pointer transition-colors ${tab===id?"border-indigo-500 text-indigo-400":"border-transparent text-zinc-500 hover:text-zinc-300"}`}>{label}</button>
+        {([["cases","Cases"],["analytics","Analytics"],["types","Case Types"],["roles","Roles"],["departments","Departments"]] as [string,string][]).map(([id,label])=>
+          <button key={id} onClick={()=>setTab(id)} data-testid={`tab-${id}`} className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 cursor-pointer transition-colors relative ${tab===id?"border-indigo-500 text-indigo-400":"border-transparent text-zinc-500 hover:text-zinc-300"}`}>
+            {label}
+            {id==="cases"&&myApprovalCount>0&&<span className="ml-1.5 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{myApprovalCount}</span>}
+          </button>
         )}
       </div>
     </div>
 
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {tab==="analytics"&&<AnalyticsPanel/>}
-      {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes} onRefresh={()=>{fetchCaseTypes();fetchCases();}}/>}
+      {tab==="types"&&<CaseTypesPanel caseTypes={caseTypes} allRoles={allRoles} onRefresh={()=>{fetchCaseTypes();fetchCases();}}/>}
+      {tab==="roles"&&<RolesPanel/>}
+      {tab==="departments"&&<DepartmentsPanel allRoles={allRoles}/>}
       {tab==="cases"&&<>
         {/* Filter bar */}
         <div className="flex flex-wrap gap-2 mb-4">
@@ -1028,7 +1761,7 @@ function CasesInner(){
               </tr></thead>
               <tbody>
                 {loading&&<tr><td colSpan={11} className="px-3 py-10 text-center"><div className="flex items-center justify-center gap-2 text-zinc-500 text-xs"><Spinner/>Loading cases…</div></td></tr>}
-                {!loading&&cases.map(c=><tr key={c.id} data-testid={`case-row-${c.id}`} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 cursor-pointer" onClick={()=>setDetailCaseId(c.id)}>
+                {!loading&&cases.map(c=>{const highlight=needsMyApproval(c);return <tr key={c.id} data-testid={`case-row-${c.id}`} className={`border-b cursor-pointer transition-colors ${highlight?"border-orange-500/30 bg-orange-500/5 hover:bg-orange-500/10":"border-zinc-800/50 hover:bg-zinc-800/30"}`} onClick={()=>setDetailCaseId(c.id)}>
                   <td className="px-3 py-2.5" onClick={e=>{e.stopPropagation();toggleSelect(c.id);}}><input type="checkbox" className="accent-indigo-500" checked={selected.includes(c.id)} onChange={()=>toggleSelect(c.id)}/></td>
                   <td className="px-3 py-2.5 font-mono text-indigo-400 text-[11px] font-semibold">{c.id}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap"><p className="text-zinc-200 font-medium">{c.typeName}</p>{c.transactionId&&<p className="text-[9px] text-blue-400 font-mono">{c.transactionId}</p>}</td>
@@ -1039,8 +1772,11 @@ function CasesInner(){
                   <td className="px-3 py-2.5"><LicBadge lic={c.license}/></td>
                   <td className="px-3 py-2.5">{c.sla&&<SlaChip due={c.sla} breached={c.slaBreached}/>}</td>
                   <td className="px-3 py-2.5 text-zinc-600 whitespace-nowrap">{c.createdAt.slice(0,10)}</td>
-                  <td className="px-3 py-2.5"><button className="text-indigo-400 hover:text-indigo-300 cursor-pointer" onClick={e=>{e.stopPropagation();setDetailCaseId(c.id);}}><Eye className="w-3.5 h-3.5"/></button></td>
-                </tr>)}
+                  <td className="px-3 py-2.5 relative">
+                    {highlight&&<span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-orange-400 rounded-r" title="Awaiting your approval"/>}
+                    <button className="text-indigo-400 hover:text-indigo-300 cursor-pointer" onClick={e=>{e.stopPropagation();setDetailCaseId(c.id);}}><Eye className="w-3.5 h-3.5"/></button>
+                  </td>
+                </tr>;})}
                 {!loading&&cases.length===0&&!error&&<tr><td colSpan={11} className="px-3 py-10 text-center text-zinc-600 text-xs">No cases match the current filters</td></tr>}
               </tbody>
             </table>
@@ -1052,11 +1788,10 @@ function CasesInner(){
 
     {selected.length>0&&tab==="cases"&&<BulkPanel selected={selected} onClear={()=>setSelected([])} onBulkDone={()=>{setSelected([]);fetchCases();}}/>}
     {showCreate&&<CreateCaseModal onClose={()=>setShowCreate(false)} onCreate={id=>{fetchCases();setDetailCaseId(id);}} defaultTransactionId={defaultTxn} caseTypes={caseTypes}/>}
-    {detailCaseId&&<CaseDetail caseId={detailCaseId} onClose={()=>setDetailCaseId(null)} onUpdate={updateCase} caseTypes={caseTypes}/>}
+    {detailCaseId&&<CaseDetail caseId={detailCaseId} onClose={()=>setDetailCaseId(null)} onUpdate={updateCase} caseTypes={caseTypes} allUsers={allUsers}/>}
   </div>;
 }
 
-// Suspense boundary required for useSearchParams in Next.js App Router
 export default function CasesPage(){
   return <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center"><div className="w-6 h-6 border-2 border-white/20 border-t-indigo-500 rounded-full animate-spin"/></div>}><CasesInner/></Suspense>;
 }

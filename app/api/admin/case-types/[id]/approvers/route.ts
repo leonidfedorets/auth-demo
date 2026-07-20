@@ -19,8 +19,24 @@ export async function GET(
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   try {
-    const rows = await sql`SELECT * FROM case_type_approver_templates WHERE case_type_id = ${id} ORDER BY sort_order`;
-    return NextResponse.json({ approvers: rows.rows.map(a => ({ id: a.id, name: a.name, role: a.role, sortOrder: a.sort_order })) });
+    const rows = await sql`
+      SELECT t.id, t.name, t.role, t.sort_order, t.role_id, t.display_name,
+             r.name AS role_name, r.color AS role_color
+      FROM case_type_approver_templates t
+      LEFT JOIN case_roles r ON r.id = t.role_id
+      WHERE t.case_type_id = ${id}
+      ORDER BY t.sort_order
+    `;
+    return NextResponse.json({
+      approvers: rows.rows.map(a => ({
+        id: a.id,
+        name: a.display_name ?? a.name,
+        role: a.role_name ?? a.role,
+        roleId: a.role_id ?? null,
+        roleColor: a.role_color ?? null,
+        sortOrder: a.sort_order,
+      })),
+    });
   } catch (e) { return NextResponse.json({ error: String(e) }, { status: 500 }); }
 }
 
@@ -32,20 +48,43 @@ export async function POST(
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
 
-  let body: { name: string; role: string };
+  let body: { name?: string; role?: string; roleId?: string; displayName?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "invalid json" }, { status: 400 }); }
-  if (!body.name?.trim()) return NextResponse.json({ error: "name required" }, { status: 400 });
-  if (!body.role?.trim()) return NextResponse.json({ error: "role required" }, { status: 400 });
+
+  // Accept either a roleId (links to case_roles) or a free-text name/role
+  const roleId = body.roleId ?? null;
+  const displayName = body.displayName ?? body.name ?? "";
+  const roleName = body.role ?? body.name ?? displayName;
+
+  if (!displayName.trim() && !roleId) {
+    return NextResponse.json({ error: "name or roleId required" }, { status: 400 });
+  }
 
   try {
+    // If roleId given, resolve the role name
+    let resolvedName = roleName;
+    let resolvedColor: string | null = null;
+    if (roleId) {
+      const rr = await sql`SELECT name, color FROM case_roles WHERE id = ${roleId}`;
+      if (rr.rows.length) { resolvedName = rr.rows[0].name; resolvedColor = rr.rows[0].color; }
+    }
+
     const maxOrder = await sql`SELECT COALESCE(MAX(sort_order), -1) AS m FROM case_type_approver_templates WHERE case_type_id = ${id}`;
     const sortOrder = Number(maxOrder.rows[0].m) + 1;
+
     const result = await sql`
-      INSERT INTO case_type_approver_templates (case_type_id, name, role, sort_order)
-      VALUES (${id}, ${body.name.trim()}, ${body.role.trim()}, ${sortOrder})
-      RETURNING *
+      INSERT INTO case_type_approver_templates (case_type_id, name, role, sort_order, role_id, display_name)
+      VALUES (${id}, ${resolvedName}, ${resolvedName}, ${sortOrder}, ${roleId}, ${displayName.trim() || resolvedName})
+      RETURNING id, name, role, sort_order, role_id, display_name
     `;
     const a = result.rows[0];
-    return NextResponse.json({ id: a.id, name: a.name, role: a.role, sortOrder: a.sort_order }, { status: 201 });
+    return NextResponse.json({
+      id: a.id,
+      name: a.display_name ?? a.name,
+      role: a.role,
+      roleId: a.role_id ?? null,
+      roleColor: resolvedColor,
+      sortOrder: a.sort_order,
+    }, { status: 201 });
   } catch (e) { return NextResponse.json({ error: String(e) }, { status: 500 }); }
 }

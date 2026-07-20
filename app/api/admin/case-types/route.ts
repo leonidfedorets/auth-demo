@@ -32,6 +32,10 @@ export async function GET(req: NextRequest) {
       triggerType: t.trigger_type,
       version: t.version,
       active: t.active,
+      priority: t.priority ?? "medium",
+      description: t.description ?? "",
+      color: t.color ?? "indigo",
+      allowedInitiatorRoles: t.allowed_initiator_roles ?? [],
       createdAt: t.created_at,
       updatedAt: t.updated_at,
       fields: fields.rows
@@ -59,7 +63,7 @@ export async function GET(req: NextRequest) {
         })),
       approverTemplates: approvers.rows
         .filter(a => a.case_type_id === t.id)
-        .map(a => ({ id: a.id, name: a.name, role: a.role, sortOrder: a.sort_order })),
+        .map(a => ({ id: a.id, name: a.display_name ?? a.name, role: a.role, roleId: a.role_id ?? null, sortOrder: a.sort_order })),
       sla: sla.rows.find(s => s.case_type_id === t.id)
         ? { slaDays: Number(sla.rows.find(s => s.case_type_id === t.id)?.sla_days ?? 5),
             escalationDays: sla.rows.find(s => s.case_type_id === t.id)?.escalation_days ?? null,
@@ -80,8 +84,9 @@ export async function POST(req: NextRequest) {
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "invalid json" }, { status: 400 }); }
 
-  const { name, department, approvalRequired, triggerType, slaDays } = body as {
+  const { name, department, approvalRequired, triggerType, slaDays, priority, description, color, allowedInitiatorRoles } = body as {
     name: string; department: string; approvalRequired?: boolean; triggerType?: string; slaDays?: number;
+    priority?: string; description?: string; color?: string; allowedInitiatorRoles?: string[];
   };
   if (!name?.trim()) return NextResponse.json({ error: "name required" }, { status: 400 });
   if (!department) return NextResponse.json({ error: "department required" }, { status: 400 });
@@ -97,8 +102,9 @@ export async function POST(req: NextRequest) {
 
   try {
     await sql`
-      INSERT INTO case_types (id, name, department, approval_required, trigger_type, version)
-      VALUES (${id}, ${name.trim()}, ${department}, ${approvalRequired ?? false}, ${triggerType ?? "manual"}, 1)
+      INSERT INTO case_types (id, name, department, approval_required, trigger_type, version, priority, description, color, allowed_initiator_roles)
+      VALUES (${id}, ${name.trim()}, ${department}, ${approvalRequired ?? false}, ${triggerType ?? "manual"}, 1,
+              ${priority ?? "medium"}, ${description ?? null}, ${color ?? "indigo"}, ${JSON.stringify(allowedInitiatorRoles ?? [])})
     `;
     await sql`
       INSERT INTO case_type_sla (case_type_id, sla_days) VALUES (${id}, ${slaDays ?? 5})

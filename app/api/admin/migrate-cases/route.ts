@@ -417,6 +417,103 @@ export async function POST(req: NextRequest) {
   }
   results.push("case_audit seeded: ok");
 
+  // ── Roles + Departments ────────────────────────────────────────────────────
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS case_roles (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name        TEXT NOT NULL UNIQUE,
+        description TEXT,
+        color       TEXT NOT NULL DEFAULT 'indigo',
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+    await sql`
+      CREATE TABLE IF NOT EXISTS case_role_users (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        role_id     UUID NOT NULL REFERENCES case_roles(id) ON DELETE CASCADE,
+        user_email  TEXT NOT NULL,
+        assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(role_id, user_email)
+      )
+    `;
+    await sql`
+      CREATE TABLE IF NOT EXISTS org_departments (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name        TEXT NOT NULL UNIQUE,
+        description TEXT,
+        head_email  TEXT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+    await sql`
+      CREATE TABLE IF NOT EXISTS org_dept_members (
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        dept_id      UUID NOT NULL REFERENCES org_departments(id) ON DELETE CASCADE,
+        member_type  TEXT NOT NULL CHECK (member_type IN ('user','role')),
+        ref          TEXT NOT NULL,
+        added_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(dept_id, member_type, ref)
+      )
+    `;
+    results.push("roles + departments: ok");
+  } catch (e) { results.push(`roles/depts: ${e}`); }
+
+  // Add role_id + display_name to approver templates
+  try {
+    await sql`ALTER TABLE case_type_approver_templates ADD COLUMN IF NOT EXISTS role_id UUID REFERENCES case_roles(id) ON DELETE SET NULL`;
+    await sql`ALTER TABLE case_type_approver_templates ADD COLUMN IF NOT EXISTS display_name TEXT`;
+    results.push("approver_templates role_id: ok");
+  } catch (e) { results.push(`approver_templates alter: ${e}`); }
+
+  // Extra fields on case_types
+  try {
+    await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium'`;
+    await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS description TEXT`;
+    await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS color TEXT DEFAULT 'indigo'`;
+    await sql`ALTER TABLE case_types ADD COLUMN IF NOT EXISTS allowed_initiator_roles JSONB DEFAULT '[]'`;
+    results.push("case_types new cols: ok");
+  } catch (e) { results.push(`case_types alter: ${e}`); }
+
+  // Seed default roles
+  const seedRoles = [
+    { name: "MLRO", description: "Money Laundering Reporting Officer", color: "red" },
+    { name: "Head of Compliance", description: "Compliance department lead", color: "indigo" },
+    { name: "Head of AML", description: "AML team lead", color: "blue" },
+    { name: "Head of Fraud", description: "Fraud team lead", color: "orange" },
+    { name: "Analyst", description: "Case analyst", color: "green" },
+    { name: "Senior Analyst", description: "Senior case analyst", color: "teal" },
+  ];
+  for (const r of seedRoles) {
+    try {
+      await sql`
+        INSERT INTO case_roles (name, description, color)
+        VALUES (${r.name}, ${r.description}, ${r.color})
+        ON CONFLICT (name) DO NOTHING
+      `;
+    } catch { /* ok */ }
+  }
+  results.push("seed roles: ok");
+
+  // Seed default org departments
+  const seedDepts = [
+    { name: "AML", description: "Anti-Money Laundering team" },
+    { name: "Compliance", description: "Regulatory compliance" },
+    { name: "Fraud", description: "Fraud investigations" },
+    { name: "Onboarding", description: "Client onboarding" },
+    { name: "Settlements", description: "Payment settlements" },
+  ];
+  for (const d of seedDepts) {
+    try {
+      await sql`
+        INSERT INTO org_departments (name, description)
+        VALUES (${d.name}, ${d.description})
+        ON CONFLICT (name) DO NOTHING
+      `;
+    } catch { /* ok */ }
+  }
+  results.push("seed org_departments: ok");
+
   // Sync sequence to max existing case number
   try {
     await sql`

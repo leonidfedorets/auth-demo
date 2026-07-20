@@ -32,7 +32,10 @@ export async function GET(
     return NextResponse.json({
       id: t.id, name: t.name, department: t.department,
       approvalRequired: t.approval_required, triggerType: t.trigger_type,
-      version: t.version, active: t.active, createdAt: t.created_at, updatedAt: t.updated_at,
+      version: t.version, active: t.active,
+      priority: t.priority ?? "medium", description: t.description ?? "",
+      color: t.color ?? "indigo", allowedInitiatorRoles: t.allowed_initiator_roles ?? [],
+      createdAt: t.created_at, updatedAt: t.updated_at,
       fields: fields.rows.map(f => ({
         id: f.id, key: f.field_key, label: f.label, type: f.field_type,
         requiredAt: f.required_at, options: f.options ?? [], active: f.active,
@@ -44,7 +47,7 @@ export async function GET(
         autoAction: tr.auto_action ?? null,
       })),
       approverTemplates: approvers.rows.map(a => ({
-        id: a.id, name: a.name, role: a.role, sortOrder: a.sort_order,
+        id: a.id, name: a.display_name ?? a.name, role: a.role, roleId: a.role_id ?? null, sortOrder: a.sort_order,
       })),
       sla: sla.rows.length
         ? { slaDays: Number(sla.rows[0].sla_days), escalationDays: sla.rows[0].escalation_days ?? null, escalateTo: sla.rows[0].escalate_to ?? null }
@@ -78,6 +81,10 @@ export async function PUT(
     if (body.approvalRequired !== undefined) { sets.push(`approval_required = $${p++}`); vals.push(body.approvalRequired); }
     if (body.triggerType !== undefined) { sets.push(`trigger_type = $${p++}`); vals.push(body.triggerType); }
     if (body.active !== undefined) { sets.push(`active = $${p++}`); vals.push(body.active); }
+    if (body.priority !== undefined) { sets.push(`priority = $${p++}`); vals.push(body.priority); }
+    if (body.description !== undefined) { sets.push(`description = $${p++}`); vals.push(body.description); }
+    if (body.color !== undefined) { sets.push(`color = $${p++}`); vals.push(body.color); }
+    if (body.allowedInitiatorRoles !== undefined) { sets.push(`allowed_initiator_roles = $${p++}`); vals.push(JSON.stringify(body.allowedInitiatorRoles)); }
 
     if (sets.length) {
       sets.push(`version = version + 1`, `updated_at = NOW()`);
