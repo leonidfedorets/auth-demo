@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminAuth } from "@/lib/admin-auth";
 import { sql } from "@vercel/postgres";
-import { verifyToken } from "@/lib/jwt";
-import { verifyApiKey } from "@/lib/api-key-auth";
-
-async function authenticate(req: NextRequest) {
-  const token = req.cookies.get("access_token")?.value;
-  if (token) { const c = await verifyToken(token); if (c) return { ok: true }; }
-  const a = await verifyApiKey(req as unknown as Request);
-  if (a) return { ok: true };
-  return null;
-}
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticate(req);
+  const auth = await adminAuth(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   try {
@@ -28,7 +19,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticate(req);
+  const auth = await adminAuth(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
 
@@ -50,7 +41,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticate(req);
+  const auth = await adminAuth(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const { searchParams } = new URL(req.url);

@@ -171,7 +171,7 @@ export async function POST(req: NextRequest) {
     VALUES (${sessionId}, ${user.id}, ${hashToken(refreshToken)}, ${familyId}, ${ip}, ${ua},
             ${JSON.stringify(["pwd"])}, ${risk.score}, ${expiresAt})
   `;
-  await cacheSession(sessionId, { userId: user.id, email: user.email }, refreshTTLSeconds());
+  await cacheSession(sessionId, { userId: user.id, email: user.email }, refreshTTLSeconds()).catch(() => {});
   await sql`
     INSERT INTO audit_logs (user_id, session_id, action, ip_address, user_agent, risk_score, details)
     VALUES (${user.id}, ${sessionId}, 'tenant.register', ${ip}, ${ua}, ${risk.score},

@@ -1,15 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminAuth } from "@/lib/admin-auth";
 import { sql } from "@vercel/postgres";
-import { verifyToken } from "@/lib/jwt";
-import { verifyApiKey } from "@/lib/api-key-auth";
-
-async function authenticate(req: NextRequest) {
-  const token = req.cookies.get("access_token")?.value;
-  if (token) { const c = await verifyToken(token); if (c) return { email: c.email as string }; }
-  const a = await verifyApiKey(req as unknown as Request);
-  if (a) return { email: "api" };
-  return null;
-}
 
 const COLORS = ["indigo","blue","green","red","amber","purple","teal","pink","orange","cyan"];
 
@@ -35,7 +26,7 @@ async function ensureTables() {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await authenticate(req);
+  const auth = await adminAuth(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
@@ -71,7 +62,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await authenticate(req);
+  const auth = await adminAuth(req);
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   let body: { name: string; description?: string; color?: string };

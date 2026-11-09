@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/jwt";
+import { adminAuth } from "@/lib/admin-auth";
 import { redis } from "@/lib/redis";
 
 export const DEFAULT_SETTINGS = {
@@ -31,9 +31,7 @@ export const DEFAULT_SETTINGS = {
 };
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const claims = await verifyToken(token);
+  const claims = await adminAuth(req);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
     const stored = await redis.get<typeof DEFAULT_SETTINGS>(`tenant:settings:${(claims.tid && claims.tid !== "default" ? claims.tid : "c7ed9c17-0633-49df-9bc7-81de55f69fb7")}`);
@@ -44,9 +42,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const token = req.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const claims = await verifyToken(token);
+  const claims = await adminAuth(req);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
   try {

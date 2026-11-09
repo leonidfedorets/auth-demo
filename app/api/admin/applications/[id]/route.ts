@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/jwt";
+import { adminAuth } from "@/lib/admin-auth";
 import { sql } from "@vercel/postgres";
 
 const DEMO_TID = "c7ed9c17-0633-49df-9bc7-81de55f69fb7";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const token = req.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const claims = await verifyToken(token);
+  const claims = await adminAuth(req);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const rawTid = claims.tid as string | undefined;
   const tid = (!rawTid || rawTid === "default") ? DEMO_TID : rawTid;
@@ -28,9 +26,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const token = req.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const claims = await verifyToken(token);
+  const claims = await adminAuth(req);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const rawTid = claims.tid as string | undefined;
   const tid = (!rawTid || rawTid === "default") ? DEMO_TID : rawTid;
@@ -66,9 +62,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const token = req.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const claims = await verifyToken(token);
+  const claims = await adminAuth(req);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const rawTid = claims.tid as string | undefined;
   const tid = (!rawTid || rawTid === "default") ? DEMO_TID : rawTid;

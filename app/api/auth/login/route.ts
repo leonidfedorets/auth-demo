@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   // Credential lookup
   const result = await sql`SELECT id, email, password_hash, display_name, mfa_enabled, totp_verified, locked, failed_attempts, last_login_ip, tenant_id FROM users WHERE email = ${email}`;
   if (result.rows.length === 0) {
-    await incrementFailedLogins(ip);
+    await incrementFailedLogins(ip).catch(() => {});
     return NextResponse.json({ error: "invalid_credentials", message: "Invalid email or password" }, { status: 401 });
   }
   const user = result.rows[0];
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
 
   const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
-    await incrementFailedLogins(ip);
+    await incrementFailedLogins(ip).catch(() => {});
     await sql`UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = ${user.id}`;
     // Lock after 10 failures
     if (user.failed_attempts >= 9) await sql`UPDATE users SET locked = true WHERE id = ${user.id}`;
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_credentials", message: "Invalid email or password" }, { status: 401 });
   }
 
-  await resetFailedLogins(ip);
+  await resetFailedLogins(ip).catch(() => {});
   await sql`UPDATE users SET failed_attempts = 0 WHERE id = ${user.id}`;
 
   // Full risk with user context
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
     INSERT INTO sessions (id, user_id, refresh_token_hash, family_id, ip_address, user_agent, amr, risk_score, expires_at)
     VALUES (${sessionId}, ${user.id}, ${hashToken(refreshToken)}, ${familyId}, ${ip}, ${ua}, ${JSON.stringify(amr)}, ${risk.score}, ${expiresAt})
   `;
-  await cacheSession(sessionId, { userId: user.id, email: user.email }, refreshTTLSeconds());
+  await cacheSession(sessionId, { userId: user.id, email: user.email }, refreshTTLSeconds()).catch(() => {});
   await sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${ip} WHERE id = ${user.id}`;
   await sql`INSERT INTO audit_logs (user_id, session_id, action, ip_address, user_agent, risk_score, details) VALUES (${user.id}, ${sessionId}, 'auth.login', ${ip}, ${ua}, ${risk.score}, ${JSON.stringify({ amr })})`;
 

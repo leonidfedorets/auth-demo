@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/cases", label: "Cases" },
   { href: "/dashboard/cases/builder", label: "Flow Builder" },
   { href: "/dashboard/onboarding", label: "Onboarding" },
+  { href: "/dashboard/crypto", label: "Crypto" },
   { href: "/dashboard/risk-rules", label: "Risk Rules" },
   { href: "/dashboard/settings", label: "Settings" },
 ];

@@ -55,6 +55,7 @@ interface Role { id: string; name: string; description: string; color: string; u
 interface OrgDept { id: string; name: string; description: string; headEmail: string; members: { type: "user" | "role"; ref: string }[] }
 interface UserInfo { id: string; email: string; displayName: string }
 interface FlowTransition { from: CaseStatus; to: CaseStatus; requiresReason: boolean; notifyRoles: string[]; autoAction: string }
+interface Client { id: string; name: string; type: string; country: string; status: string }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const STATUS_META: Record<CaseStatus,{label:string;color:string}> = {
@@ -180,15 +181,45 @@ function SectionDivider({label}:{label:string}){
 // ─── CREATE CASE MODAL ────────────────────────────────────────────────────────
 interface BulkClient { id: string; name: string }
 
+function ClientPicker({value,onChange,allClients,placeholder}:{value:Client|null;onChange:(c:Client|null)=>void;allClients:Client[];placeholder?:string}){
+  const [q,setQ]=useState("");
+  const [open,setOpen]=useState(false);
+  const ref=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    function h(e:MouseEvent){if(ref.current&&!ref.current.contains(e.target as Node))setOpen(false);}
+    document.addEventListener("mousedown",h);return()=>document.removeEventListener("mousedown",h);
+  },[]);
+  const filtered=q?allClients.filter(c=>c.name.toLowerCase().includes(q.toLowerCase())||c.id.toLowerCase().includes(q.toLowerCase())):allClients;
+  return <div className="relative" ref={ref}>
+    <div className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 h-8 cursor-pointer" onClick={()=>setOpen(o=>!o)}>
+      {value?<><span className="text-white text-xs flex-1 truncate">{value.name}</span><span className="text-zinc-500 text-[10px] font-mono">{value.id}</span><button type="button" onClick={e=>{e.stopPropagation();onChange(null);setQ("");}} className="text-zinc-600 hover:text-red-400 ml-1 cursor-pointer"><X className="w-3 h-3"/></button></>
+      :<span className="text-zinc-500 text-xs">{placeholder||"Select client…"}</span>}
+    </div>
+    {open&&<div className="absolute z-50 left-0 right-0 top-9 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+      <div className="p-2 border-b border-zinc-700">
+        <input autoFocus className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-white placeholder-zinc-500 outline-none" placeholder="Search by name or ID…" value={q} onChange={e=>setQ(e.target.value)}/>
+      </div>
+      <div className="max-h-48 overflow-y-auto">
+        {filtered.length===0?<p className="text-xs text-zinc-500 p-3 text-center">No clients found</p>
+        :filtered.map(c=><button key={c.id} type="button" onClick={()=>{onChange(c);setOpen(false);setQ("");}} className="w-full flex items-center justify-between px-3 py-2 hover:bg-zinc-700 text-left cursor-pointer transition-colors">
+          <div><p className="text-xs text-white">{c.name}</p><p className="text-[10px] text-zinc-500">{c.country}</p></div>
+          <span className="text-[10px] font-mono text-zinc-500">{c.id}</span>
+        </button>)}
+      </div>
+    </div>}
+  </div>;
+}
+
 function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onClose:()=>void;onCreate:(id:string)=>void;defaultTransactionId?:string;caseTypes:CaseType[]}){
   const [step,setStep]=useState(1);
   const [typeId,setTypeId]=useState("");
+  // client list from API
+  const [allClients,setAllClients]=useState<Client[]>([]);
   // single client
-  const [clientId,setClientId]=useState("");
-  const [clientName,setClientName]=useState("");
+  const [selectedClient,setSelectedClient]=useState<Client|null>(null);
   // bulk
   const [bulk,setBulk]=useState(false);
-  const [bulkClients,setBulkClients]=useState<BulkClient[]>([{id:"",name:""},{id:"",name:""}]);
+  const [bulkClients,setBulkClients]=useState<Client[]>([]);
   // common
   const [description,setDescription]=useState("");
   const [license,setLicense]=useState("");
@@ -199,17 +230,24 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
   const ctype=caseTypes.find(t=>t.id===typeId);
 
   useEffect(()=>{
+    fetch("/api/clients").then(r=>r.json()).then(d=>setAllClients(d.clients||[])).catch(()=>{});
+  },[]);
+
+  useEffect(()=>{
     if(defaultTransactionId) setFields(f=>({...f,transaction_id:defaultTransactionId,review_reason:"Manual Trigger"}));
   },[defaultTransactionId]);
 
-  function addBulkClient(){setBulkClients(prev=>[...prev,{id:"",name:""}]);}
-  function updateBulkClient(i:number,field:"id"|"name",val:string){
-    setBulkClients(prev=>prev.map((c,idx)=>idx===i?{...c,[field]:val}:c));
+  // bulk: add from picker
+  const [bulkPickerVal,setBulkPickerVal]=useState<Client|null>(null);
+  function addBulkClient(){
+    if(!bulkPickerVal||bulkClients.find(c=>c.id===bulkPickerVal.id)) return;
+    setBulkClients(prev=>[...prev,bulkPickerVal]);
+    setBulkPickerVal(null);
   }
-  function removeBulkClient(i:number){setBulkClients(prev=>prev.filter((_,idx)=>idx!==i));}
+  function removeBulkClient(id:string){setBulkClients(prev=>prev.filter(c=>c.id!==id));}
 
-  async function createOne(cid:string|null,cname:string|null):Promise<string>{
-    const r=await fetch("/api/cases",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({typeId,clientId:cid,clientName:cname,department:ctype?.department,description,license,customFields:fields,transactionId:defaultTransactionId||null,reporter:"Sarah K."})});
+  async function createOne(c:Client|null):Promise<string>{
+    const r=await fetch("/api/cases",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({typeId,clientId:c?.id||null,clientName:c?.name||null,department:ctype?.department,description,license,customFields:fields,transactionId:defaultTransactionId||null,reporter:"Sarah K."})});
     const data=await r.json();
     if(!r.ok) throw new Error(data.error||"Failed to create case");
     return data.id as string;
@@ -220,23 +258,23 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
     setSaving(true); setError("");
     try {
       if(bulk){
-        const valid=bulkClients.filter(c=>c.name.trim());
-        if(valid.length===0){setError("Add at least one client name.");setSaving(false);return;}
-        setSaveProgress({done:0,total:valid.length});
+        if(bulkClients.length===0){setError("Add at least one client.");setSaving(false);return;}
+        setSaveProgress({done:0,total:bulkClients.length});
         let lastId="";
-        for(let i=0;i<valid.length;i++){
-          lastId=await createOne(valid[i].id||null,valid[i].name.trim());
-          setSaveProgress({done:i+1,total:valid.length});
+        for(let i=0;i<bulkClients.length;i++){
+          lastId=await createOne(bulkClients[i]);
+          setSaveProgress({done:i+1,total:bulkClients.length});
         }
         onCreate(lastId); onClose();
       } else {
-        const id=await createOne(clientId||null,clientName||null);
+        const id=await createOne(selectedClient);
         onCreate(id); onClose();
       }
     } catch(e){setError(String(e));setSaving(false);setSaveProgress(null);}
   }
 
-  const validBulkCount=bulkClients.filter(c=>c.name.trim()).length;
+  // clients not yet added to bulk list
+  const availableForBulk=allClients.filter(c=>!bulkClients.find(b=>b.id===c.id));
 
   return <Modal title="Create New Case" onClose={onClose} wide>
     <div className="flex gap-2 mb-6">{[1,2,3].map(s=><div key={s} className={`flex-1 h-1 rounded-full transition-colors ${step>=s?"bg-indigo-500":"bg-zinc-700"}`}/>)}</div>
@@ -266,22 +304,29 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
         </button>
       </div>
 
-      {!bulk&&<>
-        <FG label="Client ID"><FIn value={clientId} onChange={v=>{setClientId(v);setClientName(v?`Client ${v}`:"");}} placeholder="MCH-XXXX (optional for precheck)"/></FG>
-        <FG label="Client Name"><FIn value={clientName} onChange={setClientName} placeholder="Resolved from ID"/></FG>
-      </>}
+      {!bulk&&<FG label="Client">
+        <ClientPicker value={selectedClient} onChange={setSelectedClient} allClients={allClients} placeholder="Search and select client…"/>
+      </FG>}
 
       {bulk&&<div className="space-y-2">
         <p className="text-[10px] text-zinc-500">One case will be cloned per client with identical content.</p>
-        {bulkClients.map((c,i)=><div key={i} className="flex gap-2 items-center">
-          <FIn value={c.id} onChange={v=>updateBulkClient(i,"id",v)} placeholder={`Client ID ${i+1} (opt.)`}/>
-          <FIn value={c.name} onChange={v=>updateBulkClient(i,"name",v)} placeholder={`Client Name ${i+1} *`}/>
-          {bulkClients.length>1&&<button onClick={()=>removeBulkClient(i)} className="text-zinc-600 hover:text-red-400 cursor-pointer shrink-0 p-1"><X className="w-3.5 h-3.5"/></button>}
-        </div>)}
-        <button onClick={addBulkClient} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer px-2 py-1 rounded-lg hover:bg-indigo-500/10 transition-colors">
-          <Plus className="w-3 h-3"/>Add Client
-        </button>
-        {validBulkCount>0&&<p className="text-[10px] text-indigo-400">{validBulkCount} case{validBulkCount!==1?"s":""} will be created</p>}
+        {/* added clients chips */}
+        {bulkClients.length>0&&<div className="flex flex-wrap gap-1.5 p-2 rounded-lg bg-zinc-900 border border-zinc-800">
+          {bulkClients.map(c=><div key={c.id} className="flex items-center gap-1 bg-indigo-600/20 border border-indigo-500/30 rounded-full px-2.5 py-1 text-[11px] text-indigo-300">
+            <span>{c.name}</span><span className="text-indigo-500 font-mono text-[9px]">{c.id}</span>
+            <button type="button" onClick={()=>removeBulkClient(c.id)} className="ml-0.5 text-indigo-500 hover:text-red-400 cursor-pointer"><X className="w-2.5 h-2.5"/></button>
+          </div>)}
+        </div>}
+        {/* picker row */}
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <ClientPicker value={bulkPickerVal} onChange={setBulkPickerVal} allClients={availableForBulk} placeholder="Add client from list…"/>
+          </div>
+          <Button onClick={addBulkClient} disabled={!bulkPickerVal} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs shrink-0 disabled:opacity-40">
+            <Plus className="w-3 h-3 mr-1"/>Add
+          </Button>
+        </div>
+        {bulkClients.length>0&&<p className="text-[10px] text-indigo-400">{bulkClients.length} case{bulkClients.length!==1?"s":""} will be created</p>}
       </div>}
 
       <FG label="License" req><FSel value={license} onChange={setLicense} opts={["UK","CA","MT"]}/></FG>
@@ -294,7 +339,7 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
 
     {/* Step 3: Custom Fields */}
     {step===3&&ctype&&<div className="space-y-4 mt-3">
-      <p className="text-xs text-zinc-500">Custom fields for <span className="text-indigo-400">{ctype.name}</span>{bulk&&<span className="ml-2 text-zinc-600">· will apply to all {validBulkCount} clients</span>}</p>
+      <p className="text-xs text-zinc-500">Custom fields for <span className="text-indigo-400">{ctype.name}</span>{bulk&&<span className="ml-2 text-zinc-600">· will apply to all {bulkClients.length} clients</span>}</p>
       {ctype.fields.filter(f=>f.active&&(requiredAtHas(f.requiredAt,"create")||requiredAtIsOptional(f.requiredAt))).map(f=>{
         if(f.conditionalOn&&fields[f.conditionalOn.key]!==f.conditionalOn.value) return null;
         return <FG key={f.key} label={f.label} req={requiredAtHas(f.requiredAt,"create")}>
@@ -311,7 +356,7 @@ function CreateCaseModal({onClose,onCreate,defaultTransactionId,caseTypes}:{onCl
         <Button variant="outline" onClick={()=>setStep(2)} className="border-zinc-700 text-zinc-400 h-8 text-xs">Back</Button>
         <Button data-testid="submit-case" onClick={submit} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs flex-1 disabled:opacity-50">
           {saving?<span className="flex items-center gap-2"><Spinner/>{saveProgress?`${saveProgress.done}/${saveProgress.total}…`:"Creating…"}</span>
-          :bulk?`Create ${validBulkCount} Case${validBulkCount!==1?"s":""}`:"Create Case"}
+          :bulk?`Create ${bulkClients.length} Case${bulkClients.length!==1?"s":""}`:"Create Case"}
         </Button>
       </div>
     </div>}
@@ -2024,7 +2069,7 @@ function CaseTypesPanel({caseTypes,allRoles,allStatuses,allUsers,onRefresh}:{cas
 
           {/* Sub-tabs */}
           <div className="flex gap-0 border-b border-zinc-800/60 mt-3">
-            {[["fields","Fields"],["flow","Status Flow"],["approvers","Approval Levels"]].map(([id,label])=>(
+            {[["fields","Fields"],["flow","Case Flow Builder"],["approvers","Approval Levels"]].map(([id,label])=>(
               <button key={id} onClick={()=>{setExpSection(id as "fields"|"flow"|"approvers");setAddFieldFor(null);setEditField(null);}} className={`px-4 py-2 text-[11px] font-medium border-b-2 cursor-pointer transition-colors ${expSection===id?"border-indigo-500 text-indigo-400":"border-transparent text-zinc-500 hover:text-zinc-300"}`}>{label}</button>
             ))}
           </div>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/jwt";
+import { adminAuth } from "@/lib/admin-auth";
 import { redis } from "@/lib/redis";
 import { sql } from "@vercel/postgres";
 import { createHash } from "crypto";
@@ -23,9 +23,7 @@ async function getApp(id: string, tid: string) {
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const token = req.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const claims = await verifyToken(token);
+  const claims = await adminAuth(req);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const rawTid = claims.tid as string | undefined;
   const tid = (!rawTid || rawTid === "default") ? DEMO_TID : rawTid;
@@ -51,9 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const token = req.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const claims = await verifyToken(token);
+  const claims = await adminAuth(req);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const rawTid = claims.tid as string | undefined;
   const tid = (!rawTid || rawTid === "default") ? DEMO_TID : rawTid;
