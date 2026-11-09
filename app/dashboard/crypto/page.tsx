@@ -134,7 +134,7 @@ interface ExchangeTx {
   status: string; created_at: string;
 }
 interface EurIncomingTx {
-  id: string; transactionType: "MERCHANT_PROJECT_INCOMING_EUR";
+  id: string; transactionType: "MERCHANT_PROJECT_INCOMING_EUR" | "MERCHANT_PROJECT_INCOMING_USD" | "MERCHANT_PROJECT_INCOMING_GBP";
   checkout_payment_id: string; currency: string; actual_received_amount: string;
   total_fee_deducted: string;
   sender_name: string; sender_account: string; beneficiary_iban: string;
@@ -1064,7 +1064,7 @@ function CheckoutPopup({ account, onUpdateAcc, onAddIncomeTx, onAddCheckout, onC
     setPhase(3);
     await sleep(1800);
     const t3: EurIncomingTx = {
-      id: t3Id, transactionType: "MERCHANT_PROJECT_INCOMING_EUR",
+      id: t3Id, transactionType: `MERCHANT_PROJECT_INCOMING_${invoiceCurrency}` as "MERCHANT_PROJECT_INCOMING_EUR" | "MERCHANT_PROJECT_INCOMING_USD" | "MERCHANT_PROJECT_INCOMING_GBP",
       checkout_payment_id: checkoutId,
       currency: invoiceCurrency,
       actual_received_amount: netSettlement,
@@ -2368,7 +2368,7 @@ function Dashboard({ account, onUpdateAcc, incomeTxs, onAddTx, checkoutOrders, e
                           {selEurTx && (
                             <div className="rounded-xl bg-zinc-800 border border-zinc-700 p-3">
                               <div className="flex items-center justify-between mb-2">
-                                <p className="text-xs font-semibold text-white">T3 · EUR Incoming detail</p>
+                                <p className="text-xs font-semibold text-white">T3 · {selEurTx.currency ?? "EUR"} Incoming detail</p>
                                 <button onClick={() => setSelEurTx(null)}><X className="w-3.5 h-3.5 text-zinc-500 cursor-pointer" /></button>
                               </div>
                               <div className="grid grid-cols-2 gap-x-4">
@@ -2377,8 +2377,8 @@ function Dashboard({ account, onUpdateAcc, incomeTxs, onAddTx, checkoutOrders, e
                                   { l: "Checkout Payment ID", v: selEurTx.checkout_payment_id, mono: true, copy: true },
                                   { l: "T2 Reference (FX)", v: selEurTx.t2_reference, mono: true, copy: true },
                                   { l: "Currency", v: selEurTx.currency },
-                                  { l: "Actual Received Amount", v: `€${selEurTx.actual_received_amount} EUR` },
-                                  { l: "Total Fee Deducted (in T2)", v: `€${selEurTx.total_fee_deducted ?? "—"}` },
+                                  { l: "Actual Received Amount", v: `${FIAT_RATES[selEurTx.currency ?? "EUR"]?.symbol ?? "€"}${selEurTx.actual_received_amount} ${selEurTx.currency ?? "EUR"}` },
+                                  { l: "Total Fee Deducted (in T2)", v: `${FIAT_RATES[selEurTx.currency ?? "EUR"]?.symbol ?? "€"}${selEurTx.total_fee_deducted ?? "—"}` },
                                   { l: "Sender Name", v: selEurTx.sender_name },
                                   { l: "Sender Account", v: selEurTx.sender_account, mono: true },
                                   { l: "Beneficiary IBAN", v: selEurTx.beneficiary_iban, mono: true, copy: true },
