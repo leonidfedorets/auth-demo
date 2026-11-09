@@ -1106,14 +1106,14 @@ function CheckoutPopup({ account, onUpdateAcc, onAddIncomeTx, onAddCheckout, onC
     };
 
     onAddCheckout(order, t2, t3);
-    // T3: credit net settlement to the matching banking balance
+    // T3: credit net settlement to project balance (project IBAN, per BVNK MERCHANT_PROJECT_INCOMING)
     const updAcc = { ...account };
     if (invoiceCurrency === "USD") {
-      updAcc.bankingUsdBalance = (parseFloat(account.bankingUsdBalance || "0") + parseFloat(netSettlement)).toFixed(2);
+      updAcc.projectUsdBalance = (parseFloat(account.projectUsdBalance || "0") + parseFloat(netSettlement)).toFixed(2);
     } else if (invoiceCurrency === "GBP") {
-      updAcc.bankingGbpBalance = (parseFloat(account.bankingGbpBalance || "0") + parseFloat(netSettlement)).toFixed(2);
+      updAcc.projectGbpBalance = (parseFloat(account.projectGbpBalance || "0") + parseFloat(netSettlement)).toFixed(2);
     } else {
-      updAcc.bankingEurBalance = (parseFloat(account.bankingEurBalance || "0") + parseFloat(netSettlement)).toFixed(2);
+      updAcc.projectEurBalance = (parseFloat(account.projectEurBalance || "0") + parseFloat(netSettlement)).toFixed(2);
     }
     onUpdateAcc(updAcc);
     setResult({ order, t1, t2, t3 });
@@ -1999,14 +1999,17 @@ function Dashboard({ account, onUpdateAcc, incomeTxs, onAddTx, checkoutOrders, e
               ))}
               {balTab === "project" && (
                 <>
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/60">
-                    <div className="flex items-center gap-3"><CIcon sym="EUR" size={32} /><div><p className="text-sm font-semibold text-white">Project EUR</p><p className="text-xs text-zinc-500">EUR · settled checkout proceeds</p></div></div>
-                    <div className="text-right"><p className="text-sm font-semibold text-white">{projectEur.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR</p>{projectEur === 0 && <p className="text-[10px] text-zinc-600">Run a checkout to receive EUR</p>}</div>
-                  </div>
-                  {([["USD", "Project USD", account.projectUsdBalance ?? "0.00"], ["GBP", "Project GBP", account.projectGbpBalance ?? "0.00"]] as [string, string, string][]).map(([sym, name, bal]) => (
+                  {([
+                    ["EUR", "Project EUR", account.projectEurBalance ?? "0.00", "EUR · settled checkout proceeds"],
+                    ["USD", "Project USD", account.projectUsdBalance ?? "0.00", "USD · settled checkout proceeds"],
+                    ["GBP", "Project GBP", account.projectGbpBalance ?? "0.00", "GBP · settled checkout proceeds"],
+                  ] as [string, string, string, string][]).map(([sym, name, bal, sub]) => (
                     <div key={sym} className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/60 last:border-0">
-                      <div className="flex items-center gap-3"><CIcon sym={sym} size={32} /><div><p className="text-sm font-semibold text-white">{name}</p><p className="text-xs text-zinc-500">{sym}</p></div></div>
-                      <p className="text-sm font-semibold text-white">{parseFloat(bal).toLocaleString("en-GB", { minimumFractionDigits: 2 })} {sym}</p>
+                      <div className="flex items-center gap-3"><CIcon sym={sym} size={32} /><div><p className="text-sm font-semibold text-white">{name}</p><p className="text-xs text-zinc-500">{sub}</p></div></div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-white">{parseFloat(bal).toLocaleString("en-GB", { minimumFractionDigits: 2 })} {sym}</p>
+                        {parseFloat(bal) === 0 && <p className="text-[10px] text-zinc-600">Run a checkout to receive</p>}
+                      </div>
                     </div>
                   ))}
                 </>
