@@ -5,7 +5,7 @@ import {
   ArrowDownLeft, ArrowUpRight, RefreshCw, Copy, Check, ChevronRight,
   ExternalLink, Clock, CheckCircle2, Loader2, Building2, User, Shield,
   Wallet, ArrowRight, BarChart2, FileText, Plus, Camera, X, Calendar,
-  ChevronLeft, Activity, Timer, ShoppingCart, ArrowLeftRight, Tag, Receipt
+  ChevronLeft, Activity, Timer, ShoppingCart, ArrowLeftRight, Tag, Receipt, TrendingUp, Download
 } from "lucide-react";
 import { DashNav } from "@/components/dash-nav";
 
@@ -92,7 +92,7 @@ interface CryptoAcc {
   createdAt: string;
 }
 interface IncomeTx {
-  id: string; transactionType: "CRYPTO_INCOMING";
+  id: string; transactionType: "CRYPTO_INCOMING" | "BUY_CRYPTO_ONRAMP";
   transferId?: string; customerId?: string;
   providerPaymentId: string; requestedCryptoAmount: string;
   receivedCryptoAmount: string; creditedCryptoAmount: string;
@@ -1382,6 +1382,144 @@ function CheckoutPopup({ account, onUpdateAcc, onAddIncomeTx, onAddCheckout, onC
 }
 
 /* ════════════════════════════════════════════
+   BUY CRYPTO POPUP (UC-09 On-ramp)
+════════════════════════════════════════════ */
+function BuyPopup({ account, onUpdateAcc, onAddTx, onClose }: {
+  account: CryptoAcc; onUpdateAcc: (a: CryptoAcc) => void;
+  onAddTx: (tx: IncomeTx) => void; onClose: () => void;
+}) {
+  const [sourceCcy, setSourceCcy] = useState("EUR");
+  const [targetSym, setTargetSym] = useState(Object.keys(account.wallets)[0] ?? "USDT");
+  const [amount, setAmount] = useState("100");
+  const [step, setStep] = useState<"form" | "processing" | "done">("form");
+  const [phase, setPhase] = useState(0);
+  const [result, setResult] = useState<{ txId: string; cryptoRcvd: string; rate: string } | null>(null);
+
+  const fiatRate = FIAT_RATES[sourceCcy] ?? FIAT_RATES.EUR;
+  const fiatAmt = parseFloat(amount) || 0;
+  const cryptoUsdRate = CRYPTO_USD_RATES[targetSym] ?? 1;
+  const cryptoFiatRate = cryptoUsdRate * fiatRate.rate;
+  const provFee = (fiatAmt * PROVIDER_FEE_RATE).toFixed(2);
+  const commFee = (fiatAmt * COMMISSION_RATE).toFixed(2);
+  const totalFee = (parseFloat(provFee) + parseFloat(commFee)).toFixed(2);
+  const netFiat = Math.max(0, fiatAmt - parseFloat(totalFee));
+  const cryptoRcvd = (netFiat / cryptoFiatRate).toFixed(8);
+  const bankingBal = sourceCcy === "USD" ? parseFloat(account.bankingUsdBalance || "0")
+    : sourceCcy === "GBP" ? parseFloat(account.bankingGbpBalance || "0")
+    : parseFloat(account.bankingEurBalance || "0");
+  const hasWallet = !!account.wallets[targetSym];
+  const valid = fiatAmt > 0 && fiatAmt <= bankingBal && hasWallet;
+
+  async function execute() {
+    setStep("processing"); setPhase(1);
+    await sleep(1600); setPhase(2);
+    await sleep(1600);
+    const txId = uid("BUY");
+    const tx: IncomeTx = {
+      id: txId, transactionType: "BUY_CRYPTO_ONRAMP",
+      providerPaymentId: uid("buypay"), requestedCryptoAmount: cryptoRcvd,
+      receivedCryptoAmount: cryptoRcvd, creditedCryptoAmount: cryptoRcvd,
+      cryptoCurrency: targetSym, network: (NETWORKS[targetSym]?.[0] ?? "ETHEREUM").split(" ")[0],
+      networkDisplay: (NETWORKS[targetSym]?.[0] ?? "ERC20").includes("TRC20") ? "TRC20" : "ERC20",
+      senderAddress: "PayDo Banking", recipientAddress: account.wallets[targetSym]?.address ?? "—",
+      transactionHash: `0x${Math.random().toString(16).slice(2, 42)}`,
+      providerFee: provFee, providerFeeEur: provFee, commissionEur: commFee,
+      commissionRate: `${(COMMISSION_RATE * 100).toFixed(1)}%`,
+      bvnkWalletId: `bvnk-wlt-${targetSym.toLowerCase()}`,
+      status: "ACCEPTED", detectedAt: now(), confirmedAt: now(),
+    };
+    onAddTx(tx);
+    const updWallets = { ...account.wallets };
+    if (updWallets[targetSym]) updWallets[targetSym] = { ...updWallets[targetSym], balance: (parseFloat(updWallets[targetSym].balance || "0") + parseFloat(cryptoRcvd)).toFixed(8) };
+    const updAcc = { ...account, wallets: updWallets };
+    if (sourceCcy === "USD") updAcc.bankingUsdBalance = (bankingBal - fiatAmt).toFixed(2);
+    else if (sourceCcy === "GBP") updAcc.bankingGbpBalance = (bankingBal - fiatAmt).toFixed(2);
+    else updAcc.bankingEurBalance = (bankingBal - fiatAmt).toFixed(2);
+    onUpdateAcc(updAcc);
+    setResult({ txId, cryptoRcvd, rate: cryptoFiatRate.toFixed(2) });
+    setStep("done");
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm shadow-2xl">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-800">
+          <div className="flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-400" /><div><p className="font-semibold text-white text-sm">Buy Crypto</p><p className="text-[10px] text-zinc-500">On-ramp · Banking → BVNK Wallet</p></div></div>
+          <button onClick={onClose}><X className="w-4 h-4 text-zinc-500 cursor-pointer" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          {step === "form" && (
+            <>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-zinc-500 mb-1 block">Source — Banking Balance</label>
+                  <div className="flex gap-1">
+                    {["EUR", "USD", "GBP"].map(c => (
+                      <button key={c} onClick={() => setSourceCcy(c)}
+                        className={`flex-1 py-1.5 text-xs rounded-lg border cursor-pointer transition-colors ${sourceCcy === c ? "bg-indigo-600 border-indigo-500 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-zinc-600 mt-1">Available: {fiatRate.symbol}{bankingBal.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-500 mb-1 block">Amount ({sourceCcy})</label>
+                  <input value={amount} onChange={e => setAmount(e.target.value)} type="number" min="1"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500" />
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-500 mb-1 block">Buy Cryptocurrency</label>
+                  <div className="grid grid-cols-4 gap-1">
+                    {Object.keys(account.wallets).map(sym => (
+                      <button key={sym} onClick={() => setTargetSym(sym)}
+                        className={`py-1.5 text-xs rounded-lg border cursor-pointer transition-colors ${targetSym === sym ? "bg-indigo-600 border-indigo-500 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
+                        {sym}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="bg-zinc-800/60 rounded-xl p-3 space-y-1.5 text-xs">
+                <div className="flex justify-between"><span className="text-zinc-500">You pay</span><span className="text-white">{fiatRate.symbol}{fiatAmt.toFixed(2)} {sourceCcy}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500">Provider fee (0.5%)</span><span className="text-zinc-400">-{fiatRate.symbol}{provFee}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500">Commission (1.5%)</span><span className="text-zinc-400">-{fiatRate.symbol}{commFee}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500">Rate</span><span className="text-zinc-300">1 {targetSym} = {fiatRate.symbol}{cryptoFiatRate.toFixed(2)}</span></div>
+                <div className="flex justify-between pt-1 border-t border-zinc-700"><span className="text-white font-semibold">You receive</span><span className="text-emerald-400 font-semibold">+{cryptoRcvd} {targetSym}</span></div>
+              </div>
+              {fiatAmt > bankingBal && <p className="text-xs text-red-400">Insufficient banking balance</p>}
+              {!hasWallet && <p className="text-xs text-red-400">No {targetSym} wallet — create one first</p>}
+              <button onClick={execute} disabled={!valid}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl py-2.5 cursor-pointer transition-colors flex items-center justify-center gap-2">
+                <TrendingUp className="w-4 h-4" />Buy {cryptoRcvd} {targetSym}
+              </button>
+            </>
+          )}
+          {step === "processing" && (
+            <div className="text-center py-6 space-y-3">
+              <div className="w-12 h-12 mx-auto rounded-full border-2 border-indigo-500/30 border-t-indigo-500 animate-spin" />
+              <p className="text-sm font-semibold text-white">{phase === 1 ? "Debiting banking balance…" : "Crediting BVNK crypto wallet…"}</p>
+              <p className="text-xs text-zinc-500">{phase === 1 ? `Deducting ${fiatRate.symbol}${fiatAmt.toFixed(2)} from Banking ${sourceCcy}` : `Sending ${cryptoRcvd} ${targetSym} to your wallet`}</p>
+            </div>
+          )}
+          {step === "done" && result && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 pb-2 border-b border-zinc-800"><CheckCircle2 className="w-5 h-5 text-emerald-400" /><p className="text-sm font-semibold text-white">Purchase complete</p></div>
+              <div className="space-y-1">
+                {([["Transaction ID", result.txId, "mono"], [`${sourceCcy} debited`, `${fiatRate.symbol}${fiatAmt.toFixed(2)}`, ""], ["Fee", `-${fiatRate.symbol}${totalFee}`, ""], ["Rate", `1 ${targetSym} = ${fiatRate.symbol}${result.rate}`, ""], [`${targetSym} received`, `+${result.cryptoRcvd} ${targetSym}`, ""]] as [string, string, string][]).map(([l, v, m]) => (
+                  <div key={l} className="flex justify-between text-xs"><span className="text-zinc-500">{l}</span><span className={`${m === "mono" ? "font-mono text-[10px] text-zinc-300" : "text-white"}`}>{v}</span></div>
+                ))}
+              </div>
+              <button onClick={onClose} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl py-2.5 cursor-pointer">Done</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════
    UNIFIED WITHDRAW POPUP  (input → quote → processing → done)
 ════════════════════════════════════════════ */
 function UnifiedWithdrawPopup({ account, onUpdateAcc, onAddTx, onAddWithdrawal, defaultSource, onClose }: {
@@ -1396,6 +1534,7 @@ function UnifiedWithdrawPopup({ account, onUpdateAcc, onAddTx, onAddWithdrawal, 
   const [source, setSource] = useState(initSource);
   type DestType = "banking" | "wallet" | "external";
   const [destType, setDestType] = useState<DestType>(initSource.startsWith("banking_") ? "wallet" : "banking");
+  const [bankingDestType, setBankingDestType] = useState<"wallet" | "external">("wallet");
   const [targetCrypto, setTargetCrypto] = useState(walletKeys[0] ?? "USDT");
   const [withdrawCurrency, setWithdrawCurrency] = useState("EUR");
   const [amount, setAmount] = useState(() =>
@@ -1458,7 +1597,7 @@ function UnifiedWithdrawPopup({ account, onUpdateAcc, onAddTx, onAddWithdrawal, 
     : parseFloat(account.bankingEurBalance || "0");
 
   const inputValid = isBanking
-    ? (eurAmt > 0 && eurAmt <= bankingBal)
+    ? (eurAmt > 0 && eurAmt <= bankingBal && (bankingDestType !== "external" || extAddress.trim().length > 10))
     : (cryptoAmt > 0 && cryptoAmt <= cryptoBal && (destType !== "external" || extAddress.trim().length > 10));
 
   async function executeWithdraw() {
@@ -1473,7 +1612,43 @@ function UnifiedWithdrawPopup({ account, onUpdateAcc, onAddTx, onAddWithdrawal, 
     await sleep(1000);
     setProcPhase(3);
 
-    if (isBanking) {
+    if (isBanking && bankingDestType === "external") {
+      // Banking → external address (UC-07: fiat-funded off-ramp to external)
+      await sleep(800); setProcPhase(4);
+      await sleep(1200);
+      const hash = `0x${Math.random().toString(16).slice(2, 16)}${Math.random().toString(16).slice(2, 16)}`;
+      const wd: WithdrawalTx = {
+        id: wdId, transactionType: "EUR_TO_CRYPTO_WITHDRAWAL", direction: "EUR_TO_CRYPTO",
+        customerId, transferId, pid: `PID-${wdId.slice(-8)}`,
+        paymentMethod: `Banking ${sourceCcy} → External ${targetCrypto}`, status: "ACCEPTED",
+        eurAmount: eurAmt.toFixed(2), networkFeeUsdt: bNetFeeUsdt,
+        providerFeeEur: bProvFeeEur, commissionEur: bCommEur,
+        commissionRate: `${(COMMISSION_RATE * 100).toFixed(1)}%`,
+        totalFeeEur: bTotalFee, netCryptoAmount: bCryptoRcvd,
+        targetCurrency: targetCrypto, targetNetwork: "BLOCKCHAIN",
+        depositAddress: extAddress.trim(), conversionRate: bCryptoFiatRate.toFixed(2),
+        externalAddress: extAddress.trim(), txHash: hash,
+        sourceBankAccount: `Banking ${sourceCcy} Account`,
+        createdAt: now(), updatedAt: now(),
+      };
+      onAddWithdrawal(wd);
+      const updAcc = { ...account };
+      if (sourceCcy === "USD") updAcc.bankingUsdBalance = (bankingBal - eurAmt).toFixed(2);
+      else if (sourceCcy === "GBP") updAcc.bankingGbpBalance = (bankingBal - eurAmt).toFixed(2);
+      else updAcc.bankingEurBalance = (bankingBal - eurAmt).toFixed(2);
+      onUpdateAcc(updAcc);
+      setDoneData({ label: `Banking ${sourceCcy} → External ${targetCrypto}`, txId: wdId, rows: [
+        ["Withdrawal ID", wdId, "mono"],
+        [`${sourceCcy} spent`, `${sourceFiatRate.symbol}${eurAmt.toFixed(2)}`],
+        ["Provider fee (0.5%)", `-${sourceFiatRate.symbol}${bProvFeeEur}`],
+        ["Commission (1.5%)", `-${sourceFiatRate.symbol}${bCommEur}`],
+        ["Exchange rate", `1 ${targetCrypto} = ${sourceFiatRate.symbol}${bCryptoFiatRate.toFixed(2)}`],
+        [`${targetCrypto} sent`, `${bCryptoRcvd} ${targetCrypto}`, "positive"],
+        ["Destination", extAddress.trim().slice(0, 20) + "…", "mono"],
+        ["Tx Hash", hash.slice(0, 24) + "…", "mono"],
+      ]});
+
+    } else if (isBanking) {
       // Banking → crypto wallet
       const tId = uid("T1");
       const t1: IncomeTx = {
@@ -1755,16 +1930,47 @@ function UnifiedWithdrawPopup({ account, onUpdateAcc, onAddTx, onAddWithdrawal, 
               )}
 
               {isBanking && (
-                <div>
-                  <label className="text-xs text-zinc-400 mb-1 block">Target crypto</label>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {(walletKeys.length > 0 ? walletKeys : ["USDT"]).map(sym => (
-                      <button key={sym} onClick={() => setTargetCrypto(sym)}
-                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs cursor-pointer transition-all ${targetCrypto === sym ? "border-indigo-500 bg-indigo-500/15 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
-                        <CIcon sym={sym} size={14} />{sym}
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-zinc-400 mb-1 block">Destination</label>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setBankingDestType("wallet")}
+                        className={`flex-1 py-2 text-xs font-semibold rounded-lg border cursor-pointer transition-all ${bankingDestType === "wallet" ? "border-indigo-500 bg-indigo-500/15 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
+                        → BVNK Wallet
                       </button>
-                    ))}
+                      <button onClick={() => setBankingDestType("external")}
+                        className={`flex-1 py-2 text-xs font-semibold rounded-lg border cursor-pointer transition-all ${bankingDestType === "external" ? "border-orange-500 bg-orange-500/10 text-orange-300" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
+                        → External Address
+                      </button>
+                    </div>
                   </div>
+                  <div>
+                    <label className="text-xs text-zinc-400 mb-1 block">Target crypto</label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {(walletKeys.length > 0 ? walletKeys : ["USDT"]).map(sym => (
+                        <button key={sym} onClick={() => setTargetCrypto(sym)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs cursor-pointer transition-all ${targetCrypto === sym ? "border-indigo-500 bg-indigo-500/15 text-white" : "border-zinc-700 text-zinc-400 hover:border-zinc-600"}`}>
+                          <CIcon sym={sym} size={14} />{sym}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {bankingDestType === "external" && (
+                    <>
+                      <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3 flex items-start gap-2">
+                        <span className="text-orange-400 text-sm shrink-0 mt-0.5">⚠</span>
+                        <p className="text-[10px] text-orange-300 leading-relaxed">Crypto transfers are <strong>irreversible</strong>. Once broadcast to the blockchain, funds cannot be recalled or reversed.</p>
+                      </div>
+                      <div>
+                        <label className="text-xs text-zinc-400 mb-1 block">Destination address ({targetCrypto})</label>
+                        <input type="text"
+                          placeholder={`Enter ${targetCrypto} wallet address`}
+                          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 h-8 text-xs text-white font-mono outline-none focus:border-indigo-500"
+                          value={extAddress} onChange={e => setExtAddress(e.target.value)} />
+                        {extAddress && extAddress.trim().length < 10 && <p className="text-[10px] text-red-400 mt-0.5">Address too short</p>}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1898,12 +2104,13 @@ function Dashboard({ account, onUpdateAcc, incomeTxs, onAddTx, checkoutOrders, e
   onCheckout: (o: CheckoutOrder, ex: ExchangeTx, eur: EurIncomingTx) => void;
   withdrawalTxs: WithdrawalTx[]; onAddWithdrawal: (w: WithdrawalTx) => void;
 }) {
-  const [view, setView] = useState<"balances" | "transactions">("balances");
+  const [view, setView] = useState<"balances" | "transactions" | "pricing" | "statements" | "documents">("balances");
   const [balTab, setBalTab] = useState<"crypto" | "banking" | "project">("crypto");
   const [txTab, setTxTab] = useState<"income" | "exchange" | "withdrawals" | "checkout">("income");
   const [showTopUp, setShowTopUp] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState<string | false>(false); // false = closed; string = defaultSource
+  const [showBuy, setShowBuy] = useState(false);
   const [showAddWallet, setShowAddWallet] = useState(false);
   const [selTx, setSelTx] = useState<IncomeTx | null>(null);
   const [selExTx, setSelExTx] = useState<ExchangeTx | null>(null);
@@ -1936,7 +2143,13 @@ function Dashboard({ account, onUpdateAcc, incomeTxs, onAddTx, checkoutOrders, e
       {/* Left sidebar */}
       <div className="w-44 shrink-0 space-y-1.5">
         <div className="rounded-xl border border-zinc-800 overflow-hidden">
-          {[{ id: "balances" as const, I: Wallet, l: "Balances" }, { id: "transactions" as const, I: Activity, l: "Transactions" }].map(item => (
+          {[
+            { id: "balances" as const, I: Wallet, l: "Balances" },
+            { id: "transactions" as const, I: Activity, l: "Transactions" },
+            { id: "pricing" as const, I: Tag, l: "Pricing" },
+            { id: "statements" as const, I: FileText, l: "Statements" },
+            { id: "documents" as const, I: Shield, l: "Documents" },
+          ].map(item => (
             <button key={item.id} onClick={() => setView(item.id)}
               className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm cursor-pointer transition-colors ${view === item.id ? "bg-indigo-600 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-white"}`}>
               <item.I className="w-4 h-4" />{item.l}
@@ -1948,7 +2161,10 @@ function Dashboard({ account, onUpdateAcc, incomeTxs, onAddTx, checkoutOrders, e
           <button onClick={() => setShowTopUp(true)} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white cursor-pointer transition-colors">
             <ArrowDownLeft className="w-4 h-4 text-emerald-400" />Top Up
           </button>
-          <button onClick={() => setShowWithdraw(Object.keys(account.wallets)[0] ?? "banking_eur")} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white cursor-pointer transition-colors">
+          <button onClick={() => setShowBuy(true)} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white cursor-pointer transition-colors">
+            <TrendingUp className="w-4 h-4 text-cyan-400" />Buy Crypto
+          </button>
+          <button onClick={() => setShowWithdraw(Object.keys(account.wallets)[0] ?? "banking_EUR")} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white cursor-pointer transition-colors">
             <ArrowUpRight className="w-4 h-4 text-orange-400" />Withdraw
           </button>
           <button onClick={() => setShowCheckout(true)} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-white cursor-pointer transition-colors">
@@ -2401,9 +2617,180 @@ function Dashboard({ account, onUpdateAcc, incomeTxs, onAddTx, checkoutOrders, e
             )}
           </div>
         )}
+
+        {/* UC-12: Pricing & Limits */}
+        {view === "pricing" && (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-gradient-to-br from-indigo-500/10 to-zinc-900 border border-indigo-500/20 p-5">
+              <p className="text-xs text-zinc-500 mb-0.5">Fee Schedule</p>
+              <p className="text-lg font-bold text-white">Pricing & Limits</p>
+              <p className="text-xs text-zinc-500">BVNK Embedded Model · PayDo tariff</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-zinc-800"><p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Transaction Fees</p></div>
+              {[
+                ["Crypto Incoming (T1)", "0%", "Network fee passed through"],
+                ["FX Conversion (T2)", "0.5% provider + 1.5% commission", "Applied to gross amount"],
+                ["Buy Crypto (On-ramp)", "0.5% provider + 1.5% commission", "Applied to fiat amount"],
+                ["Sell Crypto / Withdraw to Banking", "0.5% provider + 1.5% commission", "Applied to crypto value"],
+                ["Withdraw to External Wallet", "0.5% provider + 1.5% commission", "+ blockchain network fee"],
+                ["Checkout Settlement", "0.5% provider + 1.5% commission", "Applied to crypto received"],
+              ].map(([op, fee, note]) => (
+                <div key={op} className="flex items-start justify-between px-4 py-3 border-b border-zinc-800/60 last:border-0">
+                  <div><p className="text-sm text-white">{op}</p><p className="text-[10px] text-zinc-500">{note}</p></div>
+                  <p className="text-sm font-semibold text-orange-400 text-right ml-4 shrink-0">{fee}</p>
+                </div>
+              ))}
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-zinc-800"><p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Network Fees (blockchain)</p></div>
+              {[
+                ["USDT (ERC20 / TRC20)", "$0.10 flat", "Ethereum / Tron"],
+                ["BTC", "~0.0001 BTC", "Bitcoin mainnet"],
+                ["ETH", "~0.0005 ETH", "Gas-dependent"],
+                ["Other networks", "Variable", "Passed through at cost"],
+              ].map(([token, fee, note]) => (
+                <div key={token} className="flex items-start justify-between px-4 py-3 border-b border-zinc-800/60 last:border-0">
+                  <div><p className="text-sm text-white">{token}</p><p className="text-[10px] text-zinc-500">{note}</p></div>
+                  <p className="text-sm font-semibold text-zinc-300 ml-4 shrink-0">{fee}</p>
+                </div>
+              ))}
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-zinc-800"><p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">FX Rates (indicative)</p></div>
+              {Object.entries(FIAT_RATES).map(([ccy, r]) => (
+                <div key={ccy} className="flex justify-between px-4 py-2.5 border-b border-zinc-800/60 last:border-0">
+                  <span className="text-sm text-white">{r.symbol} {ccy}</span>
+                  <span className="text-sm text-zinc-400">1 USD = {r.symbol}{(1 / r.rate).toFixed(4)} {ccy}</span>
+                </div>
+              ))}
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-zinc-800"><p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Transaction Limits</p></div>
+              {[
+                ["Minimum Checkout", "€10.00 / $10.00 / £10.00", "Per invoice"],
+                ["Maximum Single Transfer", "€500,000", "BVNK policy"],
+                ["Daily Outbound Limit", "€2,000,000", "Subject to compliance review"],
+                ["Crypto Wallet Top-up", "No minimum", "Any amount accepted"],
+              ].map(([label, val, note]) => (
+                <div key={label} className="flex items-start justify-between px-4 py-3 border-b border-zinc-800/60 last:border-0">
+                  <div><p className="text-sm text-white">{label}</p><p className="text-[10px] text-zinc-500">{note}</p></div>
+                  <p className="text-sm font-semibold text-zinc-300 ml-4 shrink-0">{val}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* UC-14: Statements & Reports */}
+        {view === "statements" && (() => {
+          const allTxs = [
+            ...incomeTxs.map(t => ({ id: t.id, date: t.detectedAt ?? now(), type: t.transactionType === "BUY_CRYPTO_ONRAMP" ? "Buy Crypto" : "Crypto Incoming", amount: `+${t.creditedCryptoAmount} ${t.cryptoCurrency}`, status: t.status })),
+            ...withdrawalTxs.map(t => ({ id: t.id, date: t.createdAt, type: t.direction === "EUR_TO_CRYPTO" ? "Fiat → External" : t.direction === "FIAT_TO_CRYPTO" ? "Fiat → Wallet" : t.direction === "CRYPTO_TO_EUR" ? "Crypto → Banking" : "Crypto → External", amount: t.direction.startsWith("FIAT") ? `-${t.eurAmount} ${t.paymentMethod?.split("→")[0]?.replace("Banking ", "") ?? "EUR"}` : `-${t.netCryptoAmount} ${t.targetCurrency}`, status: t.status })),
+            ...checkoutOrders.map(o => ({ id: o.checkout_payment_id, date: o.created_at, type: "Checkout", amount: `+${o.order_amount} ${o.selected_crypto_asset}`, status: o.payment_status })),
+          ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+          return (
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-gradient-to-br from-indigo-500/10 to-zinc-900 border border-indigo-500/20 p-5 flex items-start justify-between">
+                <div>
+                  <p className="text-xs text-zinc-500 mb-0.5">Transaction History</p>
+                  <p className="text-lg font-bold text-white">Statements & Reports</p>
+                  <p className="text-xs text-zinc-500">{allTxs.length} transaction{allTxs.length !== 1 ? "s" : ""} total</p>
+                </div>
+                <button className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-lg cursor-pointer">
+                  <Download className="w-3.5 h-3.5" />Export CSV
+                </button>
+              </div>
+              {allTxs.length === 0 ? (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center">
+                  <FileText className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
+                  <p className="text-sm text-zinc-500">No transactions yet</p>
+                  <p className="text-xs text-zinc-600">Complete a Top Up or Checkout to see your statement</p>
+                </div>
+              ) : (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="grid grid-cols-4 px-4 py-2 border-b border-zinc-800 text-[10px] text-zinc-600 font-semibold uppercase tracking-wider">
+                    <span>Date</span><span>Type</span><span>Amount</span><span>Status</span>
+                  </div>
+                  {allTxs.map(t => (
+                    <div key={t.id} className="grid grid-cols-4 px-4 py-3 border-b border-zinc-800/50 last:border-0 hover:bg-zinc-800/30">
+                      <span className="text-xs text-zinc-400">{fmtDate(t.date)}</span>
+                      <span className="text-xs text-white">{t.type}</span>
+                      <span className={`text-xs font-semibold ${t.amount.startsWith("+") ? "text-emerald-400" : "text-orange-400"}`}>{t.amount}</span>
+                      <SBadge s={t.status} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* UC-15: Documents & Consent */}
+        {view === "documents" && (() => {
+          const docs = [
+            { id: "tnc", name: "BVNK Terms & Conditions", version: "v4.2", date: "2024-09-01", category: "Legal", accepted: true, url: "#" },
+            { id: "privacy", name: "Privacy Policy", version: "v3.1", date: "2024-07-15", category: "Legal", accepted: true, url: "#" },
+            { id: "aml", name: "AML / KYC Policy", version: "v2.5", date: "2024-06-01", category: "Compliance", accepted: true, url: "#" },
+            { id: "embedded", name: "Embedded Model Agreement", version: "v1.3", date: "2024-10-01", category: "Agreement", accepted: true, url: "#" },
+            { id: "fee", name: "Fee Schedule", version: "v5.0", date: "2025-01-01", category: "Commercial", accepted: false, url: "#" },
+          ];
+          return (
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-gradient-to-br from-indigo-500/10 to-zinc-900 border border-indigo-500/20 p-5">
+                <p className="text-xs text-zinc-500 mb-0.5">Legal Documents</p>
+                <p className="text-lg font-bold text-white">Documents & Consent</p>
+                <p className="text-xs text-zinc-500">Review and accept BVNK agreements</p>
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                {docs.map((doc, i) => (
+                  <div key={doc.id} className={`flex items-center justify-between px-4 py-3 ${i < docs.length - 1 ? "border-b border-zinc-800/60" : ""}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${doc.accepted ? "bg-emerald-600/15 border border-emerald-600/30" : "bg-orange-600/15 border border-orange-600/30"}`}>
+                        {doc.accepted ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Clock className="w-4 h-4 text-orange-400" />}
+                      </div>
+                      <div>
+                        <p className="text-sm text-white">{doc.name}</p>
+                        <p className="text-[10px] text-zinc-500">{doc.category} · {doc.version} · Updated {doc.date}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${doc.accepted ? "text-emerald-400 border-emerald-600/30 bg-emerald-600/10" : "text-orange-400 border-orange-600/30 bg-orange-600/10"}`}>
+                        {doc.accepted ? "Accepted" : "Review required"}
+                      </span>
+                      <button className="text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer border border-indigo-600/30 px-2 py-0.5 rounded">
+                        View
+                      </button>
+                      {!doc.accepted && (
+                        <button className="text-xs text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer px-2 py-1 rounded">
+                          Accept
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">Account Verification Status</p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                    <div>
+                      <p className="text-sm font-semibold text-white">Verified</p>
+                      <p className="text-[10px] text-zinc-500">Full transaction access enabled</p>
+                    </div>
+                  </div>
+                  <span className="text-xs text-emerald-400 bg-emerald-600/15 border border-emerald-600/30 px-3 py-1 rounded-full">Active</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {showTopUp && <TopUpPopup account={account} onUpdateAcc={onUpdateAcc} onAddTx={onAddTx} onClose={() => setShowTopUp(false)} />}
+      {showBuy && <BuyPopup account={account} onUpdateAcc={onUpdateAcc} onAddTx={(tx) => { onAddTx(tx); setView("transactions"); setTxTab("income"); }} onClose={() => setShowBuy(false)} />}
       {showCheckout && (
         <CheckoutPopup
           account={account}
